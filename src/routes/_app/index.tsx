@@ -15,7 +15,8 @@ import {
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
-import { CopyButton, PageHeader, SecretText, StatCard, StatusDot } from '@/components/common'
+import { ConnectCard } from '@/components/connect-card'
+import { PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { RankedList, RequestsChart } from '@/components/usage-charts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -27,7 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { useNow } from '@/hooks/use-now'
 import { consoleApi } from '@/lib/api'
-import { maskSecret, fmtAgo, fmtBytes, fmtCompact, fmtDuration, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
+import { fmtAgo, fmtBytes, fmtCompact, fmtDuration, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
 import { queries, usageQueries } from '@/lib/queries'
 import type { ConsoleStatus } from '@/lib/types'
 
@@ -111,7 +112,7 @@ function Overview() {
         </Card>
       </div>
 
-      <QuickStart status={status} />
+      <ConnectCard status={status} />
     </>
   )
 }
@@ -267,51 +268,5 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="truncate font-medium tabular">{value}</dd>
     </div>
-  )
-}
-
-function QuickStart({ status }: { status?: ConsoleStatus }) {
-  const port = status?.config?.port ?? 8317
-  const baseUrl = `${window.location.protocol}//${window.location.hostname}:${port}/v1`
-  const key = status?.config?.clientKeys[0]
-  const curlFor = (k: string) => `curl ${baseUrl}/chat/completions \\
-  -H "Authorization: Bearer ${k}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"model": "<model>", "messages": [{"role": "user", "content": "Hello"}]}'`
-  const curl = curlFor(key ?? '<client-key>')
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connect a client</CardTitle>
-        <CardDescription>Point any OpenAI, Claude or Gemini compatible tool at the proxy.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <div className="text-xs text-muted-foreground">Base URL</div>
-            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3">
-              <code className="truncate font-mono text-[13px]">{baseUrl}</code>
-              <CopyButton value={baseUrl} />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              Client key
-              <Link to="/keys" className="hover:text-foreground">
-                Manage keys
-              </Link>
-            </div>
-            <div className="flex items-center rounded-md border bg-muted/40 py-1 pr-1 pl-3">
-              {key ? <SecretText value={key} className="w-full justify-between" /> : <span className="py-1 text-sm text-muted-foreground">No client keys</span>}
-            </div>
-          </div>
-        </div>
-        <div className="relative">
-          <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 pr-10 font-mono text-xs leading-relaxed">{curlFor(key ? maskSecret(key) : '<client-key>')}</pre>
-          <CopyButton value={curl} className="absolute top-1.5 right-1.5" />
-        </div>
-      </CardContent>
-    </Card>
   )
 }

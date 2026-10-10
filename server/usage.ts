@@ -12,7 +12,7 @@ import { supervisor } from './supervisor.ts'
 
 fs.mkdirSync(paths.data, { recursive: true, mode: 0o700 })
 fs.chmodSync(paths.data, 0o700) // holds secrets: auth files, keys, usage with client keys
-const db = new DatabaseSync(paths.usageDb)
+export const db = new DatabaseSync(paths.usageDb)
 fs.chmodSync(paths.usageDb, 0o600)
 db.exec(`
   PRAGMA journal_mode = WAL;

@@ -1,6 +1,7 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { consoleApi, mgmt } from './api'
+import type { LimitReading } from './limits'
 import type { ApiKeyGroup, ConsoleStatus, CredentialsList, ReleaseInfo, UsageFacets, UsageSummary, V8Config } from './types'
 
 export const queries = {
@@ -32,6 +33,13 @@ export const queries = {
       queryKey: ['mgmt', 'credentials'],
       queryFn: () => mgmt<CredentialsList>('/credentials'),
       refetchInterval: 10_000,
+    }),
+  /** The console's own copy of each account's last limit reading, keyed by credential file name. */
+  limits: () =>
+    queryOptions({
+      queryKey: ['console', 'limits'],
+      queryFn: () => consoleApi<Record<string, LimitReading>>('/limits'),
+      refetchInterval: 30_000,
     }),
   providerGroups: (provider: string) =>
     queryOptions({

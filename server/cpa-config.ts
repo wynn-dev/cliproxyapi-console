@@ -63,7 +63,13 @@ access:
 oauth:
   auth-dir: ${q(paths.auths)}
 routing:
-  strategy: "round-robin"
+  # Prompt caches belong to one account: stay on an account until it runs out, and keep each
+  # session where it started.
+  strategy: "fill-first"
+  session-affinity: true
+  cooldown:
+    # Remember exhausted accounts across restarts.
+    save-cooldown-status: true
 observability:
   logs:
     logging-to-file: true

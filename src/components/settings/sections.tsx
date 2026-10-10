@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangleIcon } from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertTriangleIcon, LayersIcon } from 'lucide-react'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { queries } from '@/lib/queries'
+import { SUBSCRIPTION_ROUTING, hasAccountPool, keepsCachesWarm } from '@/lib/routing'
 import { NumberField, SectionCard, SelectField, SwitchField, TextField } from './form'
 import { useReportDirty, useSectionForm, type FieldSpec } from './form-state'
 
@@ -26,7 +28,7 @@ const STRATEGIES = [
   {
     value: 'round-robin',
     label: 'Round robin',
-    help: 'Rotates evenly through every eligible credential, spreading load and rate limits across accounts.',
+    help: 'Rotates evenly through every eligible credential. Suits API keys; with several subscription accounts it moves conversations between accounts, and prompt caches do not follow.',
   },
   {
     value: 'weighted-round-robin',
@@ -36,7 +38,7 @@ const STRATEGIES = [
   {
     value: 'fill-first',
     label: 'Fill first',
-    help: 'Sends everything to the first eligible credential until it hits a limit or cooldown, then moves on to the next one.',
+    help: 'Sends everything to the first eligible credential (highest priority, then file name) until it hits a limit or cooldown, then moves on to the next one. Keeps prompt caches warm on subscription accounts.',
   },
 ]
 
@@ -59,9 +61,33 @@ export function RoutingSection({ onDirty }: { onDirty: DirtyReporter }) {
   const strategy = STRATEGIES.find((s) => s.value === form.value('routing.strategy'))
   const affinity = form.value('routing.session-affinity') === true
   const affinityOff = affinity ? undefined : ' Only applies when session affinity is on.'
+  const credentials = useQuery({ ...queries.credentials(), refetchInterval: false })
+  const recommend = hasAccountPool(credentials.data?.files) && !keepsCachesWarm({ strategy: String(form.value('routing.strategy')), affinity })
 
   return (
     <SectionCard title="Routing" description="How CPA picks a credential when several can serve the same model." form={form}>
+      {recommend && (
+        <Alert>
+          <LayersIcon />
+          <AlertTitle>Several accounts share a provider</AlertTitle>
+          <AlertDescription>
+            Prompt caches belong to one account, so every switch between accounts re-sends the conversation uncached and uses limits faster.
+            Fill first with session affinity stays on one account until it runs out and keeps each conversation where it started.
+          </AlertDescription>
+          <AlertAction>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                form.set('routing.strategy', SUBSCRIPTION_ROUTING.strategy)
+                form.set('routing.session-affinity', SUBSCRIPTION_ROUTING.affinity)
+              }}
+            >
+              Use these
+            </Button>
+          </AlertAction>
+        </Alert>
+      )}
       <SelectField
         form={form}
         path="routing.strategy"
@@ -82,7 +108,7 @@ export function RoutingSection({ onDirty }: { onDirty: DirtyReporter }) {
           <>
             Pins each client session (Claude Code, Codex, OpenCode session headers, prompt cache keys, conversation IDs) to one credential so
             upstream prompt caches stay warm. Fails over automatically when that credential becomes unavailable, and a bound session keeps its
-            credential even if a higher-priority one recovers.
+            credential even if an earlier or higher-priority one recovers.
             <Default>off</Default>
           </>
         }

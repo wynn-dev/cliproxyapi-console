@@ -33,9 +33,15 @@ npx https://github.com/wynn-dev/cliproxyapi-console/releases/download/nightly/cl
 ```
 
 This installs a background service that starts at boot: systemd on Linux (a user service, or a system service when
-run as root) and launchd on macOS. It copies the app into the data directory, so it never depends on the npx cache.
-Run it again to upgrade the console. `service status` and `service uninstall` do what you'd expect;
-uninstalling keeps your data.
+run as root) and launchd on macOS. It installs the latest nightly into the data directory, so it never depends on the
+npx cache. `service status` and `service uninstall` do what you'd expect; uninstalling keeps your data.
+
+### Updating
+
+The console is published as a single rolling `nightly` release, rebuilt on every merge to `main`. When a newer build
+exists, the console's sidebar shows **Update available** with the exact command. For a service, re-run
+`service install`. For a foreground run, clear the npx cache first (`rm -rf ~/.npm/_npx`), because npx keeps reusing a
+cached package for an unchanged URL. CLIProxyAPI itself updates from the Overview page.
 
 ### Options
 

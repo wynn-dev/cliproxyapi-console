@@ -8,7 +8,7 @@ import { proxy } from 'hono/proxy'
 import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
-import { env, paths } from './env.ts'
+import { NIGHTLY_URL, env, paths } from './env.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { clearUsage, collector, type UsageFilter, usageFacets, usageRequests, usageSummary } from './usage.ts'
@@ -141,6 +141,22 @@ app.post('/console/api/process/:action', async (c) => {
 })
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))
+
+let consoleLatest: { at: number; version: string } | undefined
+
+/** Newest console nightly, from the version.txt published next to the nightly tarball. */
+app.get('/console/api/console/latest', async (c) => {
+  if (!consoleLatest || Date.now() - consoleLatest.at > 30 * 60_000) {
+    try {
+      const res = await fetch(NIGHTLY_URL.replace('cliproxyapi-console.tgz', 'version.txt'))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      consoleLatest = { at: Date.now(), version: (await res.text()).trim() }
+    } catch (err) {
+      return c.json({ error: `Could not check for console updates: ${(err as Error).message}` }, 502)
+    }
+  }
+  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, nightlyUrl: NIGHTLY_URL })
+})
 
 app.get('/console/api/release/latest', async (c) => {
   try {

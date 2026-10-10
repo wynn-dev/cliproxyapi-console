@@ -1,7 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
-  ActivityIcon,
   BarChart3Icon,
   BlocksIcon,
   FlaskConicalIcon,
@@ -14,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Logo } from '@/components/auth-shell'
 import { StatusDot } from '@/components/common'
+import { ConsoleVersion } from '@/components/console-update'
 import {
   Sidebar,
   SidebarContent,
@@ -131,10 +131,7 @@ export function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-              <ActivityIcon className="size-3.5" />
-              Console {status?.consoleVersion ?? ''}
-            </div>
+            <ConsoleVersion version={status?.consoleVersion} />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

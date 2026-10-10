@@ -12,6 +12,7 @@ import { PACKAGE, defaults, env, paths } from './env.ts'
 import { limitReadings } from './limits.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
+import { networkAddresses } from './urls.ts'
 import { clearUsage, collector, type UsageFilter, usageFacets, usageRequests, usageSummary } from './usage.ts'
 
 const pkg = JSON.parse(fs.readFileSync(path.join(paths.root, 'package.json'), 'utf8')) as { version: string }
@@ -119,7 +120,10 @@ app.get('/console/api/status', (c) => {
     dataDir: paths.data,
     process: supervisor.snapshot(),
     cpa: { version: installedVersion() ?? null, install: installProgress() ?? null },
-    config: cfg ? { host: cfg.host, port: cfg.port, clientKeys: cfg.clientKeys } : null,
+    config: cfg ? { host: cfg.host, port: cfg.port, tls: cfg.tls, clientKeys: cfg.clientKeys } : null,
+    addresses: networkAddresses(),
+    service: env.service,
+    serviceCommand: consoleCommand(true),
     collector: { lastPollAt: collector.lastPollAt || null, lastError: collector.lastError ?? null },
   })
 })
@@ -147,10 +151,10 @@ app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.
 
 let consoleLatest: { at: number; version: string } | undefined
 
-/** Runs (or, for a service, reinstalls) the latest nightly with this console's options. */
-function updateCommand() {
+/** Runs, or installs as a service, the latest nightly with this console's options. */
+function consoleCommand(service = env.service) {
   const args = ['npx', '-y', PACKAGE]
-  if (env.service) args.push('service', 'install')
+  if (service) args.push('service', 'install')
   if (paths.data !== defaults.data) args.push('--data', paths.data)
   if (env.port !== defaults.port) args.push('--port', String(env.port))
   if (env.host !== defaults.host) args.push('--host', env.host)
@@ -168,7 +172,7 @@ app.get('/console/api/console/latest', async (c) => {
       return c.json({ error: `Could not check for console updates: ${(err as Error).message}` }, 502)
     }
   }
-  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, command: updateCommand() })
+  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, command: consoleCommand() })
 })
 
 app.get('/console/api/release/latest', async (c) => {

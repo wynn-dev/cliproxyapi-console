@@ -16,13 +16,14 @@ import {
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
-import { PageHeader, StatCard, StatusDot } from '@/components/common'
+import { CopyButton, PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { RankedList, RequestsChart } from '@/components/usage-charts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
@@ -127,6 +128,29 @@ function Overview() {
   )
 }
 
+/** The console was started in a terminal: offer the command that installs it as a service, with the same options. */
+function KeepRunning({ command }: { command: string }) {
+  return (
+    <Dialog>
+      <DialogTrigger className="text-foreground underline underline-offset-4">Keep it running</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Keep the console running</DialogTitle>
+          <DialogDescription>
+            It runs in a terminal now, so it stops when that terminal closes or the machine restarts. As a background service it starts with the
+            machine (launchd on macOS, systemd on Linux) and keeps your data, accounts and settings. Stop this console first (Ctrl+C in its terminal),
+            then run:
+          </DialogDescription>
+        </DialogHeader>
+        <div className="relative">
+          <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 pr-10 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">{command}</pre>
+          <CopyButton value={command} className="absolute top-1.5 right-1.5" />
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ProcessCard({ status }: { status?: ConsoleStatus }) {
   const qc = useQueryClient()
   const latest = useQuery(queries.latestRelease())
@@ -158,7 +182,15 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
             {meta.label}
           </Badge>
         </CardTitle>
-        <CardDescription>Managed by this console · data in {status.dataDir}</CardDescription>
+        <CardDescription>
+          Managed by this console · data in {status.dataDir}
+          {!status.service && (
+            <>
+              {' · '}
+              <KeepRunning command={status.serviceCommand} />
+            </>
+          )}
+        </CardDescription>
         <CardAction className="flex gap-2">
           {p.state === 'running' || p.state === 'starting' ? (
             <>

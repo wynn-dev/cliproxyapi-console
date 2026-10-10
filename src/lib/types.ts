@@ -29,7 +29,12 @@ export interface ConsoleStatus {
     lastError?: string
   }
   cpa: { version: string | null; install: InstallProgress | null }
-  config: { host: string; port: number; clientKeys: string[] } | null
+  config: { host: string; port: number; tls: boolean; clientKeys: string[] } | null
+  /** This machine's network addresses, for clients on other machines. */
+  addresses: string[]
+  /** Whether the console runs as a background service, and the command that installs it as one. */
+  service: boolean
+  serviceCommand: string
   collector: { lastPollAt: number | null; lastError: string | null }
 }
 

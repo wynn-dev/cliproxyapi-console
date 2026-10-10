@@ -1,6 +1,6 @@
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
-import { KeyRoundIcon, PlusIcon, ShieldAlertIcon, SparklesIcon, Trash2Icon } from 'lucide-react'
+import { Link, createFileRoute } from '@tanstack/react-router'
+import { KeyRoundIcon, PlugIcon, PlusIcon, ShieldAlertIcon, SparklesIcon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { CopyButton, PageHeader, SecretText } from '@/components/common'
@@ -20,18 +20,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useNow } from '@/hooks/use-now'
 import { consoleApi } from '@/lib/api'
 import { fmtAgo, fmtCompact, fmtNumber, maskSecret } from '@/lib/format'
+import { generateKey } from '@/lib/keys'
 import { queries, useConfigWrite, usageQueries } from '@/lib/queries'
 import type { UsageRequest } from '@/lib/types'
 
 export const Route = createFileRoute('/_app/keys')({ component: ClientKeys })
 
 const DAY = 86_400_000
-
-function generateKey() {
-  const bytes = crypto.getRandomValues(new Uint8Array(24)) // 24 bytes → 32 base64url chars
-  const b64 = btoa(String.fromCharCode(...bytes))
-  return `sk-${b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
-}
 
 function ClientKeys() {
   const config = useQuery(queries.config())
@@ -72,7 +67,15 @@ function ClientKeys() {
     <>
       <PageHeader
         title="Client keys"
-        description="Keys your tools use to call the proxy's /v1 API."
+        description={
+          <>
+            Keys your tools use to call the proxy. The{' '}
+            <Link to="/connect" className="text-foreground underline underline-offset-4">
+              Connect
+            </Link>{' '}
+            page has ready-to-run setup for each key.
+          </>
+        }
         actions={
           <>
             <Button variant="outline" onClick={() => setAdding(true)} disabled={!config.data}>
@@ -102,9 +105,8 @@ function ClientKeys() {
       )}
 
       <KeysCard keys={keys} loading={config.isLoading} onDelete={remove} />
-      <ConnectCard />
 
-      <GeneratedDialog value={created} onClose={() => setCreated(null)} />
+      <GeneratedDialog value={created} index={created ? keys.indexOf(created) : -1} onClose={() => setCreated(null)} />
       <AddExistingDialog
         open={adding}
         keys={keys}
@@ -158,7 +160,7 @@ function KeysCard({ keys, loading, onDelete }: { keys: string[]; loading: boolea
                 <TableHead className="text-right">Failed</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
                 <TableHead className="text-right">Last used</TableHead>
-                <TableHead className="w-10" />
+                <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -193,9 +195,21 @@ function KeysCard({ keys, loading, onDelete }: { keys: string[]; loading: boolea
                     </TableCell>
                     <TableCell className="text-right text-muted-foreground">{lastTs ? fmtAgo(lastTs) : 'Never'}</TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete key" onClick={() => onDelete(k)}>
-                        <Trash2Icon />
-                      </Button>
+                      <div className="flex justify-end">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Set up a client with this key" asChild>
+                              <Link to="/connect" search={{ key: i }}>
+                                <PlugIcon />
+                              </Link>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Set up a client with this key</TooltipContent>
+                        </Tooltip>
+                        <Button variant="ghost" size="icon-sm" className="text-muted-foreground" aria-label="Delete key" onClick={() => onDelete(k)}>
+                          <Trash2Icon />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )
@@ -208,49 +222,28 @@ function KeysCard({ keys, loading, onDelete }: { keys: string[]; loading: boolea
   )
 }
 
-function ConnectCard() {
-  const { data: status } = useQuery(queries.status())
-  const port = status?.config?.port ?? 8317
-  const baseUrl = `${window.location.protocol}//${window.location.hostname}:${port}/v1`
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Using a key</CardTitle>
-        <CardDescription>Send it as a Bearer token (or x-api-key / x-goog-api-key) to the proxy.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <div className="text-xs text-muted-foreground">Base URL</div>
-          <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3">
-            <code className="truncate font-mono text-[13px]">{baseUrl}</code>
-            <CopyButton value={baseUrl} />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <div className="text-xs text-muted-foreground">Header</div>
-          <div className="flex items-center rounded-md border bg-muted/40 py-1 pr-1 pl-3">
-            <code className="truncate py-1 font-mono text-[13px]">Authorization: Bearer &lt;client-key&gt;</code>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function GeneratedDialog({ value, onClose }: { value: string | null; onClose: () => void }) {
+function GeneratedDialog({ value, index, onClose }: { value: string | null; index: number; onClose: () => void }) {
   return (
     <Dialog open={!!value} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New client key</DialogTitle>
-          <DialogDescription>Copy it into your client now. It is saved in the proxy config and active immediately.</DialogDescription>
+          <DialogDescription>It is saved in the proxy config and active immediately. The Connect page fills it into ready-to-run setup.</DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 py-1 pr-1 pl-3">
           <code className="font-mono text-[13px] break-all">{value}</code>
           <CopyButton value={value ?? ''} />
         </div>
         <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
+          <Button variant="outline" onClick={onClose}>
+            Done
+          </Button>
+          <Button asChild>
+            <Link to="/connect" search={index >= 0 ? { key: index } : {}}>
+              <PlugIcon />
+              Set up a client
+            </Link>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

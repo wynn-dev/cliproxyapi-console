@@ -27,7 +27,8 @@ pre-generated, so save it, then click **Start CLIProxyAPI**. CPA is already down
 fill in the form.
 
 Clients then connect straight to CPA, e.g. `http://<server>:8317/v1`, using the client key shown on the Overview page.
-For Claude Code, the Connect page has the commands ready to paste, with your address and key filled in.
+The Connect page has ready-to-run setup for Claude Code, Codex and other clients, with the address and key of your choice
+filled in, and checks from your browser that both work.
 
 ### Keep it running
 

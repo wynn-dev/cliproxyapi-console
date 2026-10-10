@@ -6,6 +6,7 @@ import { paths } from './env.ts'
 export interface CpaConfigSummary {
   host: string
   port: number
+  tls: boolean
   secretKey: string
   clientKeys: string[]
 }
@@ -30,6 +31,7 @@ export function readCpaConfig(): CpaConfigSummary | undefined {
     const summary: CpaConfigSummary = {
       host: doc.server?.host ?? '',
       port: Number(doc.server?.port ?? 8317),
+      tls: doc.server?.tls?.enable === true,
       secretKey: String(doc.management?.['secret-key'] ?? ''),
       clientKeys: (doc.access?.['api-keys'] ?? []).filter((k: unknown) => typeof k === 'string'),
     }

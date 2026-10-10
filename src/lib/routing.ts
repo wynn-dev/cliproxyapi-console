@@ -24,5 +24,13 @@ export function routingOf(config: V8Config | undefined) {
   }
 }
 
+const STRATEGY_LABELS: Record<string, string> = {
+  'round-robin': 'Round robin',
+  'weighted-round-robin': 'Weighted round robin',
+  'fill-first': 'Fill first',
+}
+
+export const strategyLabel = (strategy: string) => STRATEGY_LABELS[strategy] ?? strategy
+
 export const keepsCachesWarm = (r: { strategy: string; affinity: boolean }) =>
   r.strategy === SUBSCRIPTION_ROUTING.strategy && r.affinity === SUBSCRIPTION_ROUTING.affinity

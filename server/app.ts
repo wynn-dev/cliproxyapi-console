@@ -9,6 +9,7 @@ import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
 import { PACKAGE, defaults, env, paths } from './env.ts'
+import { limitReadings } from './limits.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { clearUsage, collector, type UsageFilter, usageFacets, usageRequests, usageSummary } from './usage.ts'
@@ -139,6 +140,8 @@ app.post('/console/api/process/:action', async (c) => {
   }
   return c.json(supervisor.snapshot())
 })
+
+app.get('/console/api/limits', (c) => c.json(limitReadings()))
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))
 

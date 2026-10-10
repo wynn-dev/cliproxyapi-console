@@ -13,6 +13,7 @@ import {
   ZapIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
 import { CopyButton, PageHeader, SecretText, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
@@ -27,9 +28,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { useNow } from '@/hooks/use-now'
 import { consoleApi } from '@/lib/api'
 import { maskSecret, fmtAgo, fmtBytes, fmtCompact, fmtDuration, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
-import { providerLabel } from '@/lib/providers'
 import { queries, usageQueries } from '@/lib/queries'
-import type { ConsoleStatus, Credential } from '@/lib/types'
+import type { ConsoleStatus } from '@/lib/types'
 
 export const Route = createFileRoute('/_app/')({ component: Overview })
 
@@ -74,6 +74,8 @@ function Overview() {
         <StatCard label="Avg latency" icon={TimerIcon} loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
       </div>
 
+      <AccountsCard running={running} />
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -91,10 +93,6 @@ function Overview() {
             {usage.data ? <RequestsChart series={usage.data.series} bucketMs={usage.data.bucketMs} /> : <Skeleton className="h-64 w-full" />}
           </CardContent>
         </Card>
-        <CredentialHealth enabled={running} />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader>
             <CardTitle>Top models</CardTitle>
@@ -111,8 +109,9 @@ function Overview() {
             />
           </CardContent>
         </Card>
-        <QuickStart status={status} />
       </div>
+
+      <QuickStart status={status} />
     </>
   )
 }
@@ -271,79 +270,6 @@ function Meta({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function credentialHealth(c: Credential): 'disabled' | 'cooling' | 'error' | 'ok' {
-  if (c.disabled) return 'disabled'
-  if (c.status === 'error') return 'error'
-  if (c.unavailable || (c.cooldowns?.length ?? 0) > 0) return 'cooling'
-  return 'ok'
-}
-
-function CredentialHealth({ enabled }: { enabled: boolean }) {
-  const { data, isLoading } = useQuery({ ...queries.credentials(), enabled })
-  const files = data?.files ?? []
-  const groups = { ok: 0, cooling: 0, error: 0, disabled: 0 }
-  for (const f of files) groups[credentialHealth(f)]++
-  const attention = files.filter((f) => ['cooling', 'error'].includes(credentialHealth(f))).slice(0, 4)
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Credentials</CardTitle>
-        <CardDescription>{files.length ? `${files.length} OAuth credentials` : 'OAuth accounts in rotation'}</CardDescription>
-        <CardAction>
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/credentials">
-              Manage <ArrowRightIcon />
-            </Link>
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : files.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No credentials yet.{' '}
-            <Link to="/credentials" className="text-foreground underline underline-offset-4">
-              Add one
-            </Link>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <HealthStat tone="good" label="Healthy" n={groups.ok} />
-              <HealthStat tone="warn" label="Cooling down" n={groups.cooling} />
-              <HealthStat tone="bad" label="Error" n={groups.error} />
-              <HealthStat tone="idle" label="Disabled" n={groups.disabled} />
-            </div>
-            {attention.length > 0 && (
-              <ul className="space-y-2 border-t pt-3">
-                {attention.map((c) => (
-                  <li key={c.id} className="flex items-center gap-2 text-sm">
-                    <StatusDot tone={credentialHealth(c) === 'error' ? 'bad' : 'warn'} />
-                    <span className="min-w-0 flex-1 truncate">{c.email || c.label || c.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{providerLabel(c.provider)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function HealthStat({ tone, label, n }: { tone: 'good' | 'warn' | 'bad' | 'idle'; label: string; n: number }) {
-  return (
-    <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-      <StatusDot tone={n ? tone : 'idle'} />
-      <span className="flex-1 text-muted-foreground">{label}</span>
-      <span className="font-medium tabular">{n}</span>
-    </div>
-  )
-}
-
 function QuickStart({ status }: { status?: ConsoleStatus }) {
   const port = status?.config?.port ?? 8317
   const baseUrl = `${window.location.protocol}//${window.location.hostname}:${port}/v1`
@@ -355,7 +281,7 @@ function QuickStart({ status }: { status?: ConsoleStatus }) {
   const curl = curlFor(key ?? '<client-key>')
 
   return (
-    <Card className="lg:col-span-2">
+    <Card>
       <CardHeader>
         <CardTitle>Connect a client</CardTitle>
         <CardDescription>Point any OpenAI, Claude or Gemini compatible tool at the proxy.</CardDescription>

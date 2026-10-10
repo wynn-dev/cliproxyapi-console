@@ -13,6 +13,8 @@ export interface LimitWindow {
   label: string
   /** Share of the limit used, 0 to 1. */
   used: number
+  /** Share of the limit left, 0 to 1. Zero once the provider rejects requests, even below 100% used. */
+  left: number
   /** When the window resets (ms). Absent when unknown or already passed. */
   resetsAt?: number
   /** The window reset after the reading was taken, so nothing has been used since. */
@@ -47,7 +49,7 @@ export function limitWindows(provider: string, reading: LimitReading | undefined
     const reset = w.resetsAt !== undefined && w.resetsAt <= now
     const used = reset ? 0 : Math.min(1, Math.max(0, w.used))
     const level = reset ? 'ok' : w.rejected || w.used >= 1 ? 'exhausted' : w.warned || w.used >= 0.8 ? 'warning' : 'ok'
-    out.push({ id: w.id, label: w.label, used, resetsAt: reset ? undefined : w.resetsAt, reset, level })
+    out.push({ id: w.id, label: w.label, used, left: level === 'exhausted' ? 0 : 1 - used, resetsAt: reset ? undefined : w.resetsAt, reset, level })
   }
 
   if (provider === 'claude') {

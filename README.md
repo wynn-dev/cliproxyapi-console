@@ -7,7 +7,7 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
   crashes, and updates it in one click.
 - **Usage analytics**: CPA only keeps per-request usage for a few minutes. The console drains it continuously into
   SQLite, so you get history by model, credential, client key and provider, with tokens, latency and failures.
-- **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how full each is
+- **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how much of each is left
   and when it resets.
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
 - **API providers & client keys**: structured editors instead of raw YAML.

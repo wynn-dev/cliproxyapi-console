@@ -1,12 +1,13 @@
 name: Nightly
 
-# Every merge to main rebuilds the single rolling `nightly` release.
+# Every merge to main publishes a new build to npm under the default `latest` tag.
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write # npm trusted publishing: no token, provenance included
 
 concurrency:
   group: nightly
@@ -21,36 +22,15 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: pnpm
+          registry-url: https://registry.npmjs.org
       # `prepare` builds the SPA and the server.
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
 
-      # A unique version per build, so npx and the console can tell nightlies apart.
-      - name: Pack
+      # A unique version per build, so npm accepts it and the console can tell nightlies apart.
+      - name: Publish
         run: |
           version="$(node -p 'require("./package.json").version.split("-")[0]')-nightly.${{ github.run_number }}"
           npm version "$version" --no-git-tag-version
-          npm pack --ignore-scripts
-          mv cliproxyapi-console-*.tgz cliproxyapi-console.tgz
-          echo "$version" > version.txt
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git tag -f nightly "$GITHUB_SHA"
-          git push -f origin refs/tags/nightly
-          notes="Rolling build of \`${GITHUB_SHA::7}\` ($VERSION).
-
-          \`\`\`sh
-          npx -y https://github.com/${{ github.repository }}/releases/download/nightly/cliproxyapi-console.tgz
-          \`\`\`"
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release upload nightly cliproxyapi-console.tgz version.txt --clobber
-            gh release edit nightly --title "Nightly ($VERSION)" --notes "$notes"
-          else
-            gh release create nightly cliproxyapi-console.tgz version.txt --title "Nightly ($VERSION)" --notes "$notes" --latest
-          fi
+          npm publish --ignore-scripts --tag latest

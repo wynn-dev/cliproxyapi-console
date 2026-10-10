@@ -31,5 +31,5 @@ export const env = {
 }
 
 export const CPA_REPO = 'router-for-me/CLIProxyAPI'
-export const CONSOLE_REPO = 'wynn-dev/cliproxyapi-console'
-export const NIGHTLY_URL = `https://github.com/${CONSOLE_REPO}/releases/download/nightly/cliproxyapi-console.tgz`
+/** The console's npm package. Its default `latest` tag is the rolling nightly. */
+export const PACKAGE = 'cliproxyui'

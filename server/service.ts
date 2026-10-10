@@ -2,14 +2,13 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { NIGHTLY_URL, env, paths } from './env.ts'
+import { PACKAGE, env, paths } from './env.ts'
 import { consoleUrls } from './urls.ts'
 
 /** Installs the console as a background service: systemd on Linux, launchd on macOS. */
 
 const NAME = 'cpa-console'
 const LABEL = 'com.github.wynn-dev.cliproxyapi-console'
-const PACKAGE_NAME = 'cliproxyapi-console'
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 const run = (cmd: string, args: string[], quiet = false) =>
@@ -24,13 +23,13 @@ const launchdTarget = () => `gui/${process.getuid?.()}`
 
 /**
  * The service runs from its own install in the data directory, never from the npx cache (which is
- * pruned at will and never refreshed for a fixed URL). From an installed package, that install is the
- * newest nightly; from a source checkout, it is the local build.
+ * pruned at will). From an installed package, that install is the newest nightly; from a source
+ * checkout, it is the local build.
  */
 function installedEntry() {
   const app = path.join(paths.data, 'app')
   const fromSource = path.basename(path.dirname(paths.root)) !== 'node_modules'
-  let spec = NIGHTLY_URL
+  let spec = `${PACKAGE}@latest`
   let tmp: string | undefined
   if (fromSource) {
     if (!fs.existsSync(path.join(paths.root, 'dist-server/cli.js')) || !fs.existsSync(path.join(paths.root, 'dist'))) {
@@ -53,7 +52,7 @@ function installedEntry() {
   } finally {
     if (tmp) fs.rmSync(tmp, { recursive: true, force: true })
   }
-  return path.join(app, 'node_modules', PACKAGE_NAME, 'dist-server/cli.js')
+  return path.join(app, 'node_modules', PACKAGE, 'dist-server/cli.js')
 }
 
 function environment() {
@@ -116,7 +115,7 @@ ${vars}
 
 function assertSupported() {
   if (process.platform !== 'linux' && process.platform !== 'darwin') {
-    throw new Error('Service install supports Linux (systemd) and macOS (launchd). On other systems, run `cpa-console start` with your own supervisor.')
+    throw new Error('Service install supports Linux (systemd) and macOS (launchd). On other systems, run `cliproxyui start` with your own supervisor.')
   }
 }
 
@@ -204,5 +203,5 @@ async function printWhenReady() {
     }
     await new Promise((r) => setTimeout(r, 500))
   }
-  console.warn(`  The service did not respond on port ${env.port} yet. Check \`cpa-console service status\`.`)
+  console.warn(`  The service did not respond on port ${env.port} yet. Check \`cliproxyui service status\`.`)
 }

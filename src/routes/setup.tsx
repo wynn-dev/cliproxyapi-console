@@ -80,7 +80,7 @@ function SetupForm({ onDone }: { onDone: () => void }) {
                   <FieldLabel htmlFor="token">Setup token</FieldLabel>
                   <Input id="token" autoFocus className="font-mono" value={token} onChange={(e) => setToken(e.target.value)} />
                   <FieldDescription className="flex items-center gap-1.5">
-                    <TerminalIcon className="size-3.5 shrink-0" /> Open the setup link printed by cpa-console, or paste its token here.
+                    <TerminalIcon className="size-3.5 shrink-0" /> Open the setup link printed by cliproxyui, or paste its token here.
                   </FieldDescription>
                 </Field>
               )}

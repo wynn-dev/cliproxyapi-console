@@ -48,7 +48,7 @@ export function AccountsCard({ running }: { running: boolean }) {
     <Card>
       <CardHeader>
         <CardTitle>Accounts</CardTitle>
-        <CardDescription>Usage limits as each provider last reported them.</CardDescription>
+        <CardDescription>How much of each usage limit is left, as each provider last reported it.</CardDescription>
         <CardAction>
           <Button variant="ghost" size="sm" asChild>
             <Link to="/credentials">
@@ -161,18 +161,20 @@ const METER_TONE = {
 }
 
 function LimitMeter({ window: w, now, observedAt }: { window: LimitWindow; now: number; observedAt?: number }) {
-  const pct = Math.round(w.used * 100)
+  const pct = Math.round(w.left * 100)
   const tone = METER_TONE[w.level]
   const resets = w.resetsAt ? `resets in ${fmtUntil(w.resetsAt - now)}` : undefined
-  const caption = w.reset ? 'Reset, unused since' : w.level === 'exhausted' ? ['Limit reached', resets].filter(Boolean).join(' · ') : resets
+  const caption = w.reset ? 'Reset since the last reading' : w.level === 'exhausted' ? ['Limit reached', resets].filter(Boolean).join(' · ') : resets
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${w.label} limit`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${w.label} limit left`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="truncate text-muted-foreground">{w.label}</span>
-            <span className="font-medium tabular">{pct}%</span>
+            <span className="font-medium tabular">
+              {pct}% <span className="font-normal text-muted-foreground">left</span>
+            </span>
           </div>
           <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
             <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
@@ -182,8 +184,9 @@ function LimitMeter({ window: w, now, observedAt }: { window: LimitWindow; now: 
       </TooltipTrigger>
       <TooltipContent>
         <div className="font-medium">
-          {w.label}: {pct}% used
+          {w.label}: {pct}% left
         </div>
+        <div>{Math.round(w.used * 100)}% used</div>
         {w.resetsAt && <div>Resets {new Date(w.resetsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
         {w.reset && <div>This window has reset since the last reading.</div>}
         {observedAt && <div className="opacity-80">Reported {fmtAgo(observedAt)}</div>}

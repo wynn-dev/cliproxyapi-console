@@ -8,7 +8,7 @@ interface ConsoleLatest {
   current: string
   latest: string
   service: boolean
-  nightlyUrl: string
+  command: string
 }
 
 const nightly = (v: string) => Number(v.match(/-nightly\.(\d+)$/)?.[1] ?? NaN)
@@ -32,10 +32,6 @@ export function ConsoleVersion({ version }: { version?: string }) {
   )
   if (!outdated) return label
 
-  const command = data.service
-    ? `npx -y ${data.nightlyUrl} service install`
-    : `rm -rf ~/.npm/_npx && npx -y ${data.nightlyUrl}`
-
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -52,14 +48,14 @@ export function ConsoleVersion({ version }: { version?: string }) {
             You're on {data.current}; the latest nightly is {data.latest}.{' '}
             {data.service
               ? 'Run this on the server. It reinstalls the service with the latest nightly and keeps your data and CLIProxyAPI settings.'
-              : 'Stop the console, then run this on the server. npx caches the package, so the first part clears that cache.'}
+              : 'Stop the console, then run this on the server to start the latest nightly.'}
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
           <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 pr-10 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all">
-            {command}
+            {data.command}
           </pre>
-          <CopyButton value={command} className="absolute top-1.5 right-1.5" />
+          <CopyButton value={data.command} className="absolute top-1.5 right-1.5" />
         </div>
       </DialogContent>
     </Dialog>

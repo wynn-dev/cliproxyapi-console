@@ -2,7 +2,10 @@ import os from 'node:os'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
-const data = path.resolve(process.env.CPA_CONSOLE_DATA ?? path.join(os.homedir(), '.cpa-console'))
+
+export const defaults = { data: path.join(os.homedir(), '.cpa-console'), host: '0.0.0.0', port: 8320 }
+
+const data = path.resolve(process.env.CPA_CONSOLE_DATA ?? defaults.data)
 
 export const paths = {
   root,
@@ -16,8 +19,8 @@ export const paths = {
 }
 
 export const env = {
-  host: process.env.HOST ?? '0.0.0.0',
-  port: Number(process.env.PORT ?? 8320),
+  host: process.env.HOST ?? defaults.host,
+  port: Number(process.env.PORT ?? defaults.port),
   usageRetentionDays: Number(process.env.USAGE_RETENTION_DAYS ?? 90),
   /** Behind a reverse proxy: rate-limit by the X-Forwarded-For client address instead of the socket. */
   trustProxy: ['1', 'true'].includes(process.env.TRUST_PROXY ?? ''),

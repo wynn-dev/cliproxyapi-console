@@ -7,6 +7,7 @@ import {
   CircleGaugeIcon,
   CoinsIcon,
   PlayIcon,
+  PlugIcon,
   RotateCwIcon,
   SquareIcon,
   TimerIcon,
@@ -15,7 +16,6 @@ import {
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
-import { ConnectCard } from '@/components/connect-card'
 import { PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { RankedList, RequestsChart } from '@/components/usage-charts'
@@ -53,7 +53,18 @@ function Overview() {
 
   return (
     <>
-      <PageHeader title="Overview" description="Health of your CLIProxyAPI instance and the last 24 hours of traffic." />
+      <PageHeader
+        title="Overview"
+        description="Health of your CLIProxyAPI instance and the last 24 hours of traffic."
+        actions={
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/connect">
+              <PlugIcon />
+              Connect Claude Code
+            </Link>
+          </Button>
+        }
+      />
       <ProcessCard status={status} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -112,7 +123,6 @@ function Overview() {
         </Card>
       </div>
 
-      <ConnectCard status={status} />
     </>
   )
 }

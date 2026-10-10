@@ -6,7 +6,7 @@ import { readState, updateState } from './state.ts'
 const MAX_FAILURES = 5
 const BAN_MS = 15 * 60_000
 
-const failures = new Map<string, { count: number; since: number; bannedUntil: number }>()
+const failures = new Map<string, { tried: Set<string>; since: number; bannedUntil: number }>()
 // bcrypt is deliberately slow; remember keys already verified against the current hash.
 const verified = new Map<string, string>()
 
@@ -44,12 +44,15 @@ export function authenticate(ip: string, key: string | undefined): AuthResult {
     return { ok: true }
   }
   // Failures are counted within a sliding window, so occasional typos never add up to a ban.
+  // Each wrong key counts once: a browser still holding an old key sends it on several requests
+  // at the same time, and that must not spend every attempt.
   const fresh = entry && !entry.bannedUntil && Date.now() - entry.since < BAN_MS
-  const count = (fresh ? entry.count : 0) + 1
+  const tried = fresh ? entry.tried : new Set<string>()
+  tried.add(crypto.createHash('sha256').update(key ?? '').digest('base64'))
   failures.set(ip, {
-    count,
+    tried,
     since: fresh ? entry.since : Date.now(),
-    bannedUntil: count >= MAX_FAILURES ? Date.now() + BAN_MS : 0,
+    bannedUntil: tried.size >= MAX_FAILURES ? Date.now() + BAN_MS : 0,
   })
   return { ok: false, status: 401, error: key ? 'Invalid management key' : 'Missing management key' }
 }

@@ -17,7 +17,7 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 Requires Node.js 22.13 or newer.
 
 ```sh
-npx https://github.com/wynn-dev/cliproxyapi-console/releases/download/nightly/cliproxyapi-console.tgz
+npx cliproxyui
 ```
 
 The console prints a setup link (and opens it if it can). Open it and pick the proxy port. The management key is
@@ -29,7 +29,7 @@ Clients then connect straight to CPA, e.g. `http://<server>:8317/v1`, using the 
 ### Keep it running
 
 ```sh
-npx https://github.com/wynn-dev/cliproxyapi-console/releases/download/nightly/cliproxyapi-console.tgz service install
+npx cliproxyui service install
 ```
 
 This installs a background service that starts at boot: systemd on Linux (a user service, or a system service when
@@ -38,17 +38,17 @@ npx cache. `service status` and `service uninstall` do what you'd expect; uninst
 
 ### Updating
 
-The console is published as a single rolling `nightly` release, rebuilt on every merge to `main`. When a newer build
-exists, the console's sidebar shows **Update available** with the exact command, including any `--data`, `--port` or
-`--host` options the console runs with. For a service, that re-runs `service install`, which reinstalls the latest
-nightly and keeps your data. For a foreground run, stop the console and run the npx command again; npx re-checks the URL
-and fetches the new build. CLIProxyAPI itself updates from the Overview page.
+The console is a rolling nightly: every merge to `main` publishes a new build to npm under the default `latest` tag.
+When a newer build exists, the console's sidebar shows **Update available** with the exact command, including any
+`--data`, `--port` or `--host` options the console runs with. For a service, that re-runs `service install`, which
+reinstalls the latest nightly and keeps your data. For a foreground run, stop the console and run the npx command
+again; npx fetches the new build. CLIProxyAPI itself updates from the Overview page.
 
 ### Options
 
 ```
-cpa-console [start] [--port 8320] [--host 0.0.0.0] [--data ~/.cpa-console] [--no-open]
-cpa-console service install|uninstall|status [same options]
+cliproxyui [start] [--port 8320] [--host 0.0.0.0] [--data ~/.cpa-console] [--no-open]
+cliproxyui service install|uninstall|status [same options]
 ```
 
 | Flag | Env | Default | |

@@ -6,10 +6,10 @@ import { parseArgs } from 'node:util'
 const HELP = `CPA Console — run and manage CLIProxyAPI from a web UI
 
 Usage:
-  cpa-console [start]            Start the console (and CLIProxyAPI) in the foreground
-  cpa-console service install    Install and start as a background service (systemd / launchd)
-  cpa-console service uninstall  Remove the background service (keeps your data)
-  cpa-console service status     Show service status
+  cliproxyui [start]            Start the console (and CLIProxyAPI) in the foreground
+  cliproxyui service install    Install and start as a background service (systemd / launchd)
+  cliproxyui service uninstall  Remove the background service (keeps your data)
+  cliproxyui service status     Show service status
 
 Options:
   -p, --port <port>   Console port (default 8320, env PORT)

@@ -1,5 +1,5 @@
 {
-  "name": "cliproxyapi-console",
+  "name": "cliproxyui",
   "version": "0.1.0",
   "description": "A self-contained web console that installs, runs and manages CLIProxyAPI",
   "license": "MIT",
@@ -18,7 +18,7 @@
   ],
   "type": "module",
   "bin": {
-    "cpa-console": "dist-server/cli.js"
+    "cliproxyui": "dist-server/cli.js"
   },
   "files": [
     "dist",

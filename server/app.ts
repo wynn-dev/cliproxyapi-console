@@ -8,7 +8,7 @@ import { proxy } from 'hono/proxy'
 import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
-import { NIGHTLY_URL, env, paths } from './env.ts'
+import { NIGHTLY_URL, defaults, env, paths } from './env.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { clearUsage, collector, type UsageFilter, usageFacets, usageRequests, usageSummary } from './usage.ts'
@@ -144,6 +144,16 @@ app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.
 
 let consoleLatest: { at: number; version: string } | undefined
 
+/** Runs (or, for a service, reinstalls) the latest nightly with this console's options. */
+function updateCommand() {
+  const args = ['npx', '-y', NIGHTLY_URL]
+  if (env.service) args.push('service', 'install')
+  if (paths.data !== defaults.data) args.push('--data', paths.data)
+  if (env.port !== defaults.port) args.push('--port', String(env.port))
+  if (env.host !== defaults.host) args.push('--host', env.host)
+  return args.map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`)).join(' ')
+}
+
 /** Newest console nightly, from the version.txt published next to the nightly tarball. */
 app.get('/console/api/console/latest', async (c) => {
   if (!consoleLatest || Date.now() - consoleLatest.at > 30 * 60_000) {
@@ -155,7 +165,7 @@ app.get('/console/api/console/latest', async (c) => {
       return c.json({ error: `Could not check for console updates: ${(err as Error).message}` }, 502)
     }
   }
-  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, nightlyUrl: NIGHTLY_URL })
+  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, command: updateCommand() })
 })
 
 app.get('/console/api/release/latest', async (c) => {

@@ -39,9 +39,10 @@ npx cache. `service status` and `service uninstall` do what you'd expect; uninst
 ### Updating
 
 The console is published as a single rolling `nightly` release, rebuilt on every merge to `main`. When a newer build
-exists, the console's sidebar shows **Update available** with the exact command. For a service, re-run
-`service install`. For a foreground run, clear the npx cache first (`rm -rf ~/.npm/_npx`), because npx keeps reusing a
-cached package for an unchanged URL. CLIProxyAPI itself updates from the Overview page.
+exists, the console's sidebar shows **Update available** with the exact command, including any `--data`, `--port` or
+`--host` options the console runs with. For a service, that re-runs `service install`, which reinstalls the latest
+nightly and keeps your data. For a foreground run, stop the console and run the npx command again; npx re-checks the URL
+and fetches the new build. CLIProxyAPI itself updates from the Overview page.
 
 ### Options
 

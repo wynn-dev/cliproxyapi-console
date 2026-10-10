@@ -2,13 +2,15 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { env, paths } from './env.ts'
+import { NIGHTLY_URL, env, paths } from './env.ts'
 import { consoleUrls } from './urls.ts'
 
 /** Installs the console as a background service: systemd on Linux, launchd on macOS. */
 
 const NAME = 'cpa-console'
 const LABEL = 'com.github.wynn-dev.cliproxyapi-console'
+const PACKAGE_NAME = 'cliproxyapi-console'
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
 const run = (cmd: string, args: string[], quiet = false) =>
   execFileSync(cmd, args, { stdio: quiet ? 'ignore' : 'inherit' })
@@ -21,34 +23,41 @@ const plistPath = () => path.join(os.homedir(), 'Library/LaunchAgents', `${LABEL
 const launchdTarget = () => `gui/${process.getuid?.()}`
 
 /**
- * The service must not depend on where this copy runs from (the npx cache can be pruned at any time;
- * pnpm and global installs use layouts that don't copy well). Install a self-contained copy of the
- * built package into the data directory instead, with its production dependencies.
+ * The service runs from its own install in the data directory, never from the npx cache (which is
+ * pruned at will and never refreshed for a fixed URL). From an installed package, that install is the
+ * newest nightly; from a source checkout, it is the local build.
  */
 function installedEntry() {
   const app = path.join(paths.data, 'app')
-  const entry = path.join(app, 'dist-server/cli.js')
-  if (path.resolve(paths.root) === path.resolve(app)) return entry // re-installing from the copy itself
-
-  if (!fs.existsSync(path.join(paths.root, 'dist-server/cli.js')) || !fs.existsSync(path.join(paths.root, 'dist'))) {
-    throw new Error('Run `pnpm build` before installing the service from a source checkout.')
+  const fromSource = path.basename(path.dirname(paths.root)) !== 'node_modules'
+  let spec = NIGHTLY_URL
+  let tmp: string | undefined
+  if (fromSource) {
+    if (!fs.existsSync(path.join(paths.root, 'dist-server/cli.js')) || !fs.existsSync(path.join(paths.root, 'dist'))) {
+      throw new Error('Run `pnpm build` before installing the service from a source checkout.')
+    }
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-console-pack-'))
+    const out = execFileSync(npm, ['pack', '--ignore-scripts', '--pack-destination', tmp, '--loglevel=error'], { cwd: paths.root, encoding: 'utf8' })
+    spec = path.join(tmp, out.trim().split('\n').pop()!)
   }
+
+  console.log(fromSource ? '  Installing this build into the data directory…' : '  Installing the latest nightly into the data directory…')
   fs.rmSync(app, { recursive: true, force: true })
   fs.mkdirSync(app, { recursive: true })
-  for (const item of ['package.json', 'dist', 'dist-server']) {
-    fs.cpSync(path.join(paths.root, item), path.join(app, item), { recursive: true, dereference: true })
+  fs.writeFileSync(path.join(app, 'package.json'), '{ "private": true }\n')
+  try {
+    execFileSync(npm, ['install', spec, '--omit=dev', '--prefer-online', '--no-audit', '--no-fund', '--loglevel=error'], {
+      cwd: app,
+      stdio: 'inherit',
+    })
+  } finally {
+    if (tmp) fs.rmSync(tmp, { recursive: true, force: true })
   }
-  console.log('  Installing the console into the data directory…')
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  execFileSync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--loglevel=error'], {
-    cwd: app,
-    stdio: 'inherit',
-  })
-  return entry
+  return path.join(app, 'node_modules', PACKAGE_NAME, 'dist-server/cli.js')
 }
 
 function environment() {
-  return { CPA_CONSOLE_DATA: paths.data, PORT: String(env.port), HOST: env.host }
+  return { CPA_CONSOLE_DATA: paths.data, PORT: String(env.port), HOST: env.host, CPA_CONSOLE_SERVICE: '1' }
 }
 
 function systemdUnit(entry: string) {

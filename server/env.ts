@@ -23,6 +23,10 @@ export const env = {
   trustProxy: ['1', 'true'].includes(process.env.TRUST_PROXY ?? ''),
   githubToken: process.env.GITHUB_TOKEN?.trim() || undefined,
   dev: process.env.NODE_ENV === 'development',
+  /** Set by `service install`, so the UI can tell how this console is updated. */
+  service: process.env.CPA_CONSOLE_SERVICE === '1',
 }
 
 export const CPA_REPO = 'router-for-me/CLIProxyAPI'
+export const CONSOLE_REPO = 'wynn-dev/cliproxyapi-console'
+export const NIGHTLY_URL = `https://github.com/${CONSOLE_REPO}/releases/download/nightly/cliproxyapi-console.tgz`

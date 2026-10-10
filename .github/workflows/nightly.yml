@@ -34,6 +34,7 @@ jobs:
           npm version "$version" --no-git-tag-version
           npm pack --ignore-scripts
           mv cliproxyapi-console-*.tgz cliproxyapi-console.tgz
+          echo "$version" > version.txt
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Publish
@@ -48,8 +49,8 @@ jobs:
           npx -y https://github.com/${{ github.repository }}/releases/download/nightly/cliproxyapi-console.tgz
           \`\`\`"
           if gh release view nightly >/dev/null 2>&1; then
-            gh release upload nightly cliproxyapi-console.tgz --clobber
+            gh release upload nightly cliproxyapi-console.tgz version.txt --clobber
             gh release edit nightly --title "Nightly ($VERSION)" --notes "$notes"
           else
-            gh release create nightly cliproxyapi-console.tgz --title "Nightly ($VERSION)" --notes "$notes" --latest
+            gh release create nightly cliproxyapi-console.tgz version.txt --title "Nightly ($VERSION)" --notes "$notes" --latest
           fi

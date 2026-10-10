@@ -17,7 +17,7 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 Requires Node.js 22.13 or newer.
 
 ```sh
-npx https://github.com/wynn-dev/cliproxyapi-console/releases/latest/download/cliproxyapi-console.tgz
+npx https://github.com/wynn-dev/cliproxyapi-console/releases/download/nightly/cliproxyapi-console.tgz
 ```
 
 The console prints a setup link (and opens it if it can). Open it and pick the proxy port. The management key is
@@ -29,7 +29,7 @@ Clients then connect straight to CPA, e.g. `http://<server>:8317/v1`, using the 
 ### Keep it running
 
 ```sh
-npx https://github.com/wynn-dev/cliproxyapi-console/releases/latest/download/cliproxyapi-console.tgz service install
+npx https://github.com/wynn-dev/cliproxyapi-console/releases/download/nightly/cliproxyapi-console.tgz service install
 ```
 
 This installs a background service that starts at boot: systemd on Linux (a user service, or a system service when

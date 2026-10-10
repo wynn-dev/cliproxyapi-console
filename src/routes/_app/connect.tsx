@@ -1,15 +1,18 @@
-import { Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Link, createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
-import { CopyButton, SecretText } from '@/components/common'
+import { CopyButton, PageHeader, SecretText } from '@/components/common'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { maskSecret } from '@/lib/format'
-import type { ConsoleStatus } from '@/lib/types'
+import { queries } from '@/lib/queries'
+
+export const Route = createFileRoute('/_app/connect')({ component: Connect })
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]']
 
 /** Ready-to-paste setup for Claude Code, and the plain endpoint for everything else. */
-export function ConnectCard({ status }: { status?: ConsoleStatus }) {
+function Connect() {
+  const { data: status } = useQuery(queries.status())
   const port = status?.config?.port ?? 8317
   const origin = `${window.location.protocol}//${window.location.hostname}:${port}`
   const key = status?.config?.clientKeys[0]
@@ -18,38 +21,38 @@ export function ConnectCard({ status }: { status?: ConsoleStatus }) {
   const openedLocally = LOCAL_HOSTS.includes(window.location.hostname)
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connect a client</CardTitle>
-        <CardDescription>Point Claude Code, or any OpenAI, Claude or Gemini compatible tool, at the proxy.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Tabs defaultValue="claude-code" className="gap-5">
-          <TabsList>
-            <TabsTrigger value="claude-code" className="px-3">
-              Claude Code
-            </TabsTrigger>
-            <TabsTrigger value="other" className="px-3">
-              Other clients
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="claude-code" className="space-y-5">
-            {!key && <NoKey />}
-            <ClaudeCode origin={origin} clientKey={key} />
+    <>
+      <PageHeader title="Connect" description="Point Claude Code, or any OpenAI, Claude or Gemini compatible tool, at the proxy." />
+      {!key && <NoKey />}
+      <Card>
+        <CardHeader>
+          <CardTitle>Claude Code</CardTitle>
+          <CardDescription>
+            Three steps, with this proxy's address and your client key filled in. While they are set, Claude Code uses the accounts in this
+            proxy, not the one you are signed in to.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <ClaudeCode origin={origin} clientKey={key} />
+          {(proxyLocalOnly || openedLocally) && (
             <p className="text-xs text-muted-foreground">
-              While these are set, Claude Code uses the accounts in this proxy, not the one you are signed in to.
               {proxyLocalOnly
-                ? ' The proxy only accepts connections from this machine.'
-                : openedLocally && ` Running Claude Code on another machine? Replace ${window.location.hostname} with this server's address.`}
+                ? 'The proxy only accepts connections from this machine.'
+                : `Running Claude Code on another machine? Replace ${window.location.hostname} with this server's address.`}
             </p>
-          </TabsContent>
-          <TabsContent value="other" className="space-y-4">
-            {!key && <NoKey />}
-            <OtherClients origin={origin} clientKey={key} />
-          </TabsContent>
-        </Tabs>
-      </CardContent>
-    </Card>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Other clients</CardTitle>
+          <CardDescription>Use this base URL and client key in any tool that speaks the OpenAI, Claude or Gemini API.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <OtherClients origin={origin} clientKey={key} />
+        </CardContent>
+      </Card>
+    </>
   )
 }
 

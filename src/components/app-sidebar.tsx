@@ -7,6 +7,7 @@ import {
   KeyRoundIcon,
   LayoutDashboardIcon,
   LogOutIcon,
+  PlugIcon,
   ScrollTextIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -50,7 +51,10 @@ const NAV = [
   },
   {
     label: 'Tools',
-    items: [{ to: '/playground', label: 'Playground', icon: FlaskConicalIcon }],
+    items: [
+      { to: '/connect', label: 'Connect', icon: PlugIcon },
+      { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
+    ],
   },
 ] as const
 

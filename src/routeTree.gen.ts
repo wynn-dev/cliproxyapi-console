@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppConnectRouteImport } from './routes/_app/connect'
 import { Route as AppCredentialsRouteImport } from './routes/_app/credentials'
 import { Route as AppKeysRouteImport } from './routes/_app/keys'
 import { Route as AppLogsRouteImport } from './routes/_app/logs'
@@ -38,6 +39,11 @@ const SetupRoute = SetupRouteImport.update({
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppConnectRoute = AppConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
   getParentRoute: () => AppRoute,
 } as any)
 const AppCredentialsRoute = AppCredentialsRouteImport.update({
@@ -80,6 +86,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/connect': typeof AppConnectRoute
   '/credentials': typeof AppCredentialsRoute
   '/keys': typeof AppKeysRoute
   '/logs': typeof AppLogsRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/connect': typeof AppConnectRoute
   '/credentials': typeof AppCredentialsRoute
   '/keys': typeof AppKeysRoute
   '/logs': typeof AppLogsRoute
@@ -105,6 +113,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/_app/connect': typeof AppConnectRoute
   '/_app/credentials': typeof AppCredentialsRoute
   '/_app/keys': typeof AppKeysRoute
   '/_app/logs': typeof AppLogsRoute
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/setup'
+    | '/connect'
     | '/credentials'
     | '/keys'
     | '/logs'
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
   to:
     | '/login'
     | '/setup'
+    | '/connect'
     | '/credentials'
     | '/keys'
     | '/logs'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/login'
     | '/setup'
+    | '/_app/connect'
     | '/_app/credentials'
     | '/_app/keys'
     | '/_app/logs'
@@ -188,6 +200,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/connect': {
+      id: '/_app/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof AppConnectRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/credentials': {
@@ -243,6 +262,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppRouteChildren {
+  AppConnectRoute: typeof AppConnectRoute
   AppCredentialsRoute: typeof AppCredentialsRoute
   AppKeysRoute: typeof AppKeysRoute
   AppLogsRoute: typeof AppLogsRoute
@@ -254,6 +274,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppConnectRoute: AppConnectRoute,
   AppCredentialsRoute: AppCredentialsRoute,
   AppKeysRoute: AppKeysRoute,
   AppLogsRoute: AppLogsRoute,

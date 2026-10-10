@@ -17,7 +17,7 @@ import { CopyButton } from '@/components/common'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
+import { Field, FieldError } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -25,7 +25,6 @@ import { ApiError, mgmt } from '@/lib/api'
 import { fmtBytes } from '@/lib/format'
 import { OAUTH_PROVIDERS } from '@/lib/providers'
 import { cn } from '@/lib/utils'
-import { Countdown } from './status'
 
 export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [tab, setTab] = useState('oauth')
@@ -35,13 +34,12 @@ export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onO
       <DialogContent className="gap-5 sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Add credential</DialogTitle>
-          <DialogDescription>Sign in with a provider account, or import existing auth files.</DialogDescription>
+          <DialogDescription>Sign in with a Claude or Codex account, or upload auth files you already have.</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
           <TabsList className="w-full">
             <TabsTrigger value="oauth">Sign in</TabsTrigger>
             <TabsTrigger value="upload">Upload files</TabsTrigger>
-            <TabsTrigger value="vertex">Vertex service account</TabsTrigger>
           </TabsList>
           {/* forceMount keeps an in-progress sign-in alive while switching tabs */}
           <TabsContent value="oauth" forceMount className="data-[state=inactive]:hidden">
@@ -49,9 +47,6 @@ export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onO
           </TabsContent>
           <TabsContent value="upload">
             <UploadPanel onDone={close} />
-          </TabsContent>
-          <TabsContent value="vertex">
-            <VertexPanel onDone={close} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -67,18 +62,12 @@ interface AuthUrlResponse {
   status: string
   url: string
   state: string
-  flow?: 'device'
-  user_code?: string
-  expires_in?: number
 }
 
 interface Flow {
   provider: Provider
   state: string
   url: string
-  device: boolean
-  userCode?: string
-  expiresAt?: number
 }
 
 type Outcome = { ok: true } | { ok: false; error: string }
@@ -89,15 +78,7 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
 
   const start = useMutation({
     mutationFn: (p: Provider) => mgmt<AuthUrlResponse>('/oauth/auth-url', { query: { provider: p.id, is_webui: true } }),
-    onSuccess: (r, p) =>
-      setFlow({
-        provider: p,
-        state: r.state,
-        url: r.url,
-        device: r.flow === 'device',
-        userCode: r.user_code,
-        expiresAt: r.expires_in ? Date.now() + r.expires_in * 1000 : undefined,
-      }),
+    onSuccess: (r, p) => setFlow({ provider: p, state: r.state, url: r.url }),
   })
 
   const status = useQuery({
@@ -140,7 +121,7 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
   if (!flow) {
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2">
           {OAUTH_PROVIDERS.map((p) => {
             const loading = start.isPending && start.variables?.id === p.id
             return (
@@ -200,8 +181,6 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
             </Button>
           </AlertDescription>
         </Alert>
-      ) : flow.device ? (
-        <DeviceFlow flow={flow} />
       ) : (
         <BrowserFlow flow={flow} onSubmitted={() => void status.refetch()} />
       )}
@@ -209,34 +188,9 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
       {!outcome && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Spinner className="size-3" />
-          {flow.device ? 'Waiting for you to approve the sign-in…' : 'Waiting for sign-in…'}
-          {flow.expiresAt && (
-            <span className="ml-auto">
-              Code expires in <Countdown until={flow.expiresAt} endLabel="0s" />
-            </span>
-          )}
+          Waiting for sign-in…
         </div>
       )}
-    </div>
-  )
-}
-
-function DeviceFlow({ flow }: { flow: Flow }) {
-  return (
-    <div className="space-y-4">
-      {flow.userCode && (
-        <div className="flex flex-col items-center gap-2 rounded-lg border bg-muted/40 px-4 py-5">
-          <div className="text-xs text-muted-foreground">Enter this code on the verification page</div>
-          <div className="flex items-center gap-1">
-            <code className="font-mono text-3xl font-semibold tracking-[0.2em]">{flow.userCode}</code>
-            <CopyButton value={flow.userCode} label="Copy code" />
-          </div>
-        </div>
-      )}
-      <Button className="w-full" onClick={() => window.open(flow.url, '_blank', 'noopener')}>
-        <ExternalLinkIcon />
-        Open verification page
-      </Button>
     </div>
   )
 }
@@ -459,67 +413,5 @@ function UploadPanel({ onDone }: { onDone: () => void }) {
         </Button>
       </div>
     </div>
-  )
-}
-
-// --- Vertex ------------------------------------------------------------------------------------
-
-function VertexPanel({ onDone }: { onDone: () => void }) {
-  const qc = useQueryClient()
-  const [file, setFile] = useState<File | null>(null)
-  const [location, setLocation] = useState('us-central1')
-  const importSa = useMutation({
-    mutationFn: () => {
-      const fd = new FormData()
-      fd.append('file', file!, file!.name)
-      fd.append('location', location.trim() || 'us-central1')
-      return mgmt<{ email?: string; project_id?: string }>('/oauth/import', { query: { provider: 'vertex' }, body: fd })
-    },
-    onSuccess: (r) => {
-      toast.success('Vertex service account imported', { description: [r.email, r.project_id].filter(Boolean).join(' · ') })
-      void qc.invalidateQueries({ queryKey: ['mgmt', 'credentials'] })
-      onDone()
-    },
-  })
-
-  return (
-    <form
-      className="space-y-4"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (file) importSa.mutate()
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor="vertex-file">Service account key</FieldLabel>
-        <Input
-          id="vertex-file"
-          type="file"
-          accept=".json,application/json"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null)
-            importSa.reset()
-          }}
-        />
-        <FieldDescription className="text-xs">The JSON key downloaded from Google Cloud IAM for a service account with Vertex AI access.</FieldDescription>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="vertex-location">Location</FieldLabel>
-        <Input id="vertex-location" className="font-mono" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="us-central1" />
-      </Field>
-      {importSa.error && (
-        <Alert variant="destructive">
-          <CircleAlertIcon />
-          <AlertTitle>Import failed</AlertTitle>
-          <AlertDescription>{importSa.error.message}</AlertDescription>
-        </Alert>
-      )}
-      <div className="flex justify-end">
-        <Button type="submit" disabled={!file || importSa.isPending}>
-          {importSa.isPending ? <Spinner /> : <UploadIcon />}
-          Import
-        </Button>
-      </div>
-    </form>
   )
 }

@@ -48,7 +48,7 @@ function CredentialsPage() {
             </EmptyMedia>
             <EmptyTitle>No credentials yet</EmptyTitle>
             <EmptyDescription>
-              Sign in with a Claude, Codex, Antigravity or other provider account, or upload auth files you already have.
+              Sign in with a Claude or Codex account, or upload auth files you already have.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>

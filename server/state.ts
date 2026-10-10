@@ -1,0 +1,32 @@
+import fs from 'node:fs'
+import { paths } from './env.ts'
+
+/** Console-owned state persisted next to the CPA config. Holds secrets, so it is written 0600. */
+export interface ConsoleState {
+  /** Installed CPA release tag, e.g. "v8.0.23". */
+  cpaVersion?: string
+  /** Plaintext management key, used by the console itself to talk to CPA (config only keeps a bcrypt hash). */
+  managementKey?: string
+  /** Whether CPA should be running. Stopping it from the UI persists across console restarts. */
+  autostart: boolean
+  /** PID of the CPA child, so a console that was killed hard can reap it on the next start. */
+  cpaPid?: number
+}
+
+let cached: ConsoleState | undefined
+
+export function readState(): ConsoleState {
+  if (cached) return cached
+  try {
+    cached = { autostart: true, ...JSON.parse(fs.readFileSync(paths.state, 'utf8')) }
+  } catch {
+    cached = { autostart: true }
+  }
+  return cached!
+}
+
+export function updateState(patch: Partial<ConsoleState>) {
+  cached = { ...readState(), ...patch }
+  fs.mkdirSync(paths.data, { recursive: true })
+  fs.writeFileSync(paths.state, JSON.stringify(cached, null, 2), { mode: 0o600 })
+}

@@ -102,7 +102,7 @@ function UsagePage() {
                   </Button>
                 )}
                 <Button variant="ghost" size="sm" asChild>
-                  <Link to="/">Connect a client</Link>
+                  <Link to="/connect">Connect a client</Link>
                 </Button>
               </>
             )}

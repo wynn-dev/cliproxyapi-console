@@ -112,22 +112,21 @@ app.post('/console/api/setup', async (c) => {
 /** CPA drops queued usage records after an hour, so warn well before that. */
 const USAGE_STALE_MS = 10 * 60_000
 
+/** `ok`, or why not: CPA's process state, `unresponsive`, `not-installed` or `not-set-up`. */
+function healthStatus() {
+  if (!configExists()) return 'not-set-up'
+  if (!installedVersion()) return 'not-installed'
+  if (supervisor.state !== 'running') return supervisor.state
+  return supervisor.lastCheck?.ok ? 'ok' : 'unresponsive'
+}
+
 /**
  * 200 while CPA is running and answered its last liveness check, 503 otherwise. Unauthenticated, so
- * it only reports cached states and times: no keys, paths or account names, and no calls to CPA.
+ * it only reports cached states, times and counts: no keys, paths or account names, and no calls to CPA.
  */
-app.get('/console/health', (c) => {
+function health(c: Context) {
   const p = supervisor
-  const answering = p.state === 'running' && p.lastCheck?.ok === true
-  const status = !configExists()
-    ? 'not-set-up'
-    : !installedVersion()
-      ? 'not-installed'
-      : p.state === 'running'
-        ? answering
-          ? 'ok'
-          : 'unresponsive'
-        : p.state
+  const status = healthStatus()
   // Nothing to collect while CPA is down; otherwise count from the later of the last sync and CPA's start.
   const syncedOrStarted = Math.max(collector.lastPollAt, (p.state === 'running' && p.startedAt) || 0)
   const iso = (ms: number | undefined) => (ms ? new Date(ms).toISOString() : null)
@@ -150,7 +149,11 @@ app.get('/console/health', (c) => {
     },
     status === 'ok' ? 200 : 503,
   )
-})
+}
+
+// Also with a trailing slash, which would otherwise get the SPA's 200 and keep a monitor green.
+app.get('/console/health', health)
+app.get('/console/health/', health)
 
 // --- Authenticated --------------------------------------------------------------------------
 

@@ -14,11 +14,12 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
-import { hasReading } from '@/lib/limits'
+import { fmtAgo } from '@/lib/format'
+import { accountReadings, limitWindows } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
-import type { Credential, ReserveStatus } from '@/lib/types'
+import type { Credential, LimitCheck, ReserveStatus } from '@/lib/types'
 
 const PROVIDER_ORDER = ['claude', 'codex']
 
@@ -33,6 +34,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const now = useNow(30_000)
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const stored = useQuery({ ...queries.limits(), enabled: running })
+  const checks = useQuery({ ...queries.limitChecks(), enabled: running })
   const config = useQuery({ ...queries.config(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
@@ -76,7 +78,8 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
                 <AccountRow
                   key={c.id}
                   account={c}
-                  reading={hasReading(c.quota) ? c.quota : stored.data?.[c.name]}
+                  readings={accountReadings(c.quota, stored.data?.[c.name])}
+                  check={checks.data?.enabled ? checks.data.accounts[c.name] : undefined}
                   reserve={reserve.data}
                   now={now}
                   onOpen={() => setOpen(c.name)}
@@ -120,13 +123,16 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function AccountRow({
   account: c,
-  reading,
+  readings: { reading, older },
+  check,
   reserve,
   now,
   onOpen,
 }: {
   account: Credential
-  reading?: Credential['quota']
+  readings: ReturnType<typeof accountReadings>
+  /** The account's last limit check, while checks are on. */
+  check?: LimitCheck
   reserve?: ReserveStatus
   now: number
   onOpen: () => void
@@ -134,6 +140,10 @@ function AccountRow({
   const hold = reserveHold(c, reserve)
   const recent = c.recent_requests.at(-1)
   const inUse = credState(c) === 'active' && !!recent && recent.success + recent.failed > 0
+  const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
+  const checked = !!observedAt && observedAt === check?.okAt && limitWindows(c.provider, reading, now).length > 0
+  // A live reading since the failed check shows the account works.
+  const checkFailed = !!check?.error && !(observedAt && observedAt > check.checkedAt)
 
   return (
     // The whole row opens the account panel, where everything the tooltips say is also spelled out for touch screens.
@@ -182,8 +192,23 @@ function AccountRow({
             <CredentialStatus credential={c} />
           )}
         </div>
+        {checkFailed ? (
+          <div className="truncate text-xs text-muted-foreground" title={check.error}>
+            Limit check failed: {check.error}
+          </div>
+        ) : (
+          checked && <div className="text-xs text-muted-foreground">Limits checked {fmtAgo(observedAt)}</div>
+        )}
       </div>
-      <AccountMeters account={c} reading={reading} reserve={reserve} now={now} className="sm:grid-cols-3 xl:grid-cols-4" />
+      <AccountMeters
+        account={c}
+        reading={reading}
+        older={older}
+        checkedAt={check?.okAt}
+        reserve={reserve}
+        now={now}
+        className="sm:grid-cols-3 xl:grid-cols-4"
+      />
     </li>
   )
 }

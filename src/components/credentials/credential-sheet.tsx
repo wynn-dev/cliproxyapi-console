@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useNow } from '@/hooks/use-now'
 import { consoleApi, mgmt } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtDateTime } from '@/lib/format'
-import { hasReading } from '@/lib/limits'
+import { accountReadings } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { Credential, OrderPlacement, OrderStatus } from '@/lib/types'
@@ -98,8 +98,10 @@ function SheetBody({
   const until = cooling ? cooldownUntil(c) : null
   const now = useNow(30_000)
   const stored = useQuery(queries.limits()).data
-  // CPA forgets readings when it restarts; the console keeps the last one.
-  const reading = hasReading(c.quota) ? c.quota : stored?.[c.name]
+  // CPA forgets readings when it restarts; the console keeps the last one, and limit checks add newer ones.
+  const { reading, older } = accountReadings(c.quota, stored?.[c.name])
+  const checks = useQuery(queries.limitChecks()).data
+  const checkedAt = checks?.enabled ? checks.accounts[c.name]?.okAt : undefined
   const signals = Object.entries(reading?.signals ?? {})
   // The list endpoint doesn't echo prefix/proxy_url, so read them from the file; only those two fields are kept.
   const fileFields = useQuery({
@@ -246,8 +248,11 @@ function SheetBody({
           </Section>
         )}
 
-        <Section title="Limits" hint={reading?.observed_at ? `Reported ${fmtAgo(reading.observed_at)}` : undefined}>
-          <AccountMeters account={c} reading={reading} reserve={reserve} now={now} detailed />
+        <Section
+          title="Limits"
+          hint={reading?.observed_at ? `${Date.parse(reading.observed_at) === checkedAt ? 'Checked' : 'Reported'} ${fmtAgo(reading.observed_at)}` : undefined}
+        >
+          <AccountMeters account={c} reading={reading} older={older} checkedAt={checkedAt} reserve={reserve} now={now} detailed />
           {signals.length > 0 && (
             <details className="group text-xs">
               <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">

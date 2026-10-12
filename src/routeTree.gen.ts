@@ -15,6 +15,7 @@ import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppConnectRouteImport } from './routes/_app/connect'
 import { Route as AppCredentialsRouteImport } from './routes/_app/credentials'
+import { Route as AppInsightsRouteImport } from './routes/_app/insights'
 import { Route as AppKeysRouteImport } from './routes/_app/keys'
 import { Route as AppLogsRouteImport } from './routes/_app/logs'
 import { Route as AppPlaygroundRouteImport } from './routes/_app/playground'
@@ -49,6 +50,11 @@ const AppConnectRoute = AppConnectRouteImport.update({
 const AppCredentialsRoute = AppCredentialsRouteImport.update({
   id: '/credentials',
   path: '/credentials',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppInsightsRoute = AppInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
   getParentRoute: () => AppRoute,
 } as any)
 const AppKeysRoute = AppKeysRouteImport.update({
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/connect': typeof AppConnectRoute
   '/credentials': typeof AppCredentialsRoute
+  '/insights': typeof AppInsightsRoute
   '/keys': typeof AppKeysRoute
   '/logs': typeof AppLogsRoute
   '/playground': typeof AppPlaygroundRoute
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/connect': typeof AppConnectRoute
   '/credentials': typeof AppCredentialsRoute
+  '/insights': typeof AppInsightsRoute
   '/keys': typeof AppKeysRoute
   '/logs': typeof AppLogsRoute
   '/playground': typeof AppPlaygroundRoute
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/_app/connect': typeof AppConnectRoute
   '/_app/credentials': typeof AppCredentialsRoute
+  '/_app/insights': typeof AppInsightsRoute
   '/_app/keys': typeof AppKeysRoute
   '/_app/logs': typeof AppLogsRoute
   '/_app/playground': typeof AppPlaygroundRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/connect'
     | '/credentials'
+    | '/insights'
     | '/keys'
     | '/logs'
     | '/playground'
@@ -143,6 +153,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/connect'
     | '/credentials'
+    | '/insights'
     | '/keys'
     | '/logs'
     | '/playground'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/_app/connect'
     | '/_app/credentials'
+    | '/_app/insights'
     | '/_app/keys'
     | '/_app/logs'
     | '/_app/playground'
@@ -216,6 +228,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCredentialsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/insights': {
+      id: '/_app/insights'
+      path: '/insights'
+      fullPath: '/insights'
+      preLoaderRoute: typeof AppInsightsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/keys': {
       id: '/_app/keys'
       path: '/keys'
@@ -264,6 +283,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppConnectRoute: typeof AppConnectRoute
   AppCredentialsRoute: typeof AppCredentialsRoute
+  AppInsightsRoute: typeof AppInsightsRoute
   AppKeysRoute: typeof AppKeysRoute
   AppLogsRoute: typeof AppLogsRoute
   AppPlaygroundRoute: typeof AppPlaygroundRoute
@@ -276,6 +296,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppConnectRoute: AppConnectRoute,
   AppCredentialsRoute: AppCredentialsRoute,
+  AppInsightsRoute: AppInsightsRoute,
   AppKeysRoute: AppKeysRoute,
   AppLogsRoute: AppLogsRoute,
   AppPlaygroundRoute: AppPlaygroundRoute,

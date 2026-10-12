@@ -88,13 +88,15 @@ if ((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_v
         AND total_tokens = input_tokens + output_tokens + cache_write_tokens;
     UPDATE requests SET input_tokens = input_tokens + cached_tokens + cache_write_tokens,
         total_tokens = MAX(total_tokens, input_tokens + cached_tokens + cache_write_tokens + output_tokens)
-      WHERE provider = 'claude';
+      WHERE provider = 'claude' AND (cached_tokens > 0 OR cache_write_tokens > 0);
     UPDATE requests SET output_tokens = output_tokens + reasoning_tokens
       WHERE reasoning_tokens > 0 AND total_tokens = input_tokens + output_tokens + reasoning_tokens
         AND (provider LIKE '%gemini%' OR provider IN ('aistudio', 'antigravity', 'vertex'));
     PRAGMA user_version = 1;
     COMMIT;
   `)
+  // One transaction over every row grows the WAL to about the size of the database; give it back.
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
 }
 
 /** CPA's canonical token accounting (sdk/cliproxy/usage/accounting.go): buckets that never overlap. */

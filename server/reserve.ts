@@ -1,4 +1,4 @@
-import { limitWindows, type LimitReading } from './limit-windows.ts'
+import { RESERVE_WINDOWS, limitWindows, type LimitReading, type ReserveWindow } from './limit-windows.ts'
 import type { ListedCredential } from './limits.ts'
 import { management } from './management.ts'
 import { readState, updateState } from './state.ts'
@@ -14,13 +14,10 @@ import { db } from './usage.ts'
  * reserve until the window that tripped it resets.
  */
 
-export type ReserveWindow = '5h' | 'weekly'
 export type ReserveLimits = Record<ReserveWindow, number>
 
 const DEFAULT_LIMITS: ReserveLimits = { '5h': 5, weekly: 5 }
 const PROVIDERS = new Set(['claude', 'codex'])
-/** The windows the reserve covers, by the label limitWindows gives them. Model-scoped ones (Fable) are left to CPA. */
-const WINDOW_LABELS: Record<string, ReserveWindow> = { '5h': '5h', Weekly: 'weekly' }
 
 db.exec(`CREATE TABLE IF NOT EXISTS reserve (
   name TEXT PRIMARY KEY,
@@ -76,7 +73,7 @@ function shortfall(provider: string, reading: LimitReading | undefined, limits: 
   const seen = new Set<ReserveWindow>()
   let until = 0
   for (const w of limitWindows(provider, reading, now)) {
-    const id = WINDOW_LABELS[w.label]
+    const id = RESERVE_WINDOWS[w.label]
     // Without a reset time the account could never be enabled again.
     if (!id || !limits[id] || w.resetsAt === undefined) continue
     seen.add(id)

@@ -1,8 +1,10 @@
+import { useQuery } from '@tanstack/react-query'
 import { StatusDot } from '@/components/common'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtDuration } from '@/lib/format'
+import { queries } from '@/lib/queries'
 import type { Cooldown, Credential } from '@/lib/types'
-import { STATE_META, cooldownLabel, cooldownUntil, credState, useTicker } from './lib'
+import { STATE_META, cooldownLabel, cooldownUntil, credState, reserveHold, reserveNote, useTicker } from './lib'
 
 /** Live "4m 12s" countdown to a timestamp. */
 export function Countdown({ until, endLabel = 'retrying' }: { until: number; endLabel?: string }) {
@@ -28,26 +30,33 @@ export function CooldownTooltipBody({ cooldowns }: { cooldowns: Cooldown[] }) {
 }
 
 export function CredentialStatus({ credential: c }: { credential: Credential }) {
+  const reserve = useQuery(queries.reserve()).data
   const state = credState(c)
   const meta = STATE_META[state]
-  const until = state === 'cooling' ? cooldownUntil(c) : null
+  const hold = reserveHold(c, reserve)
+  const reserved = !!hold && !hold.overridden
+  const until = state === 'cooling' ? cooldownUntil(c) : reserved ? hold.until : null
   const cooldowns = c.cooldowns ?? []
   const onlyModels = cooldowns.length > 0 && cooldowns.every((cd) => cd.scope === 'model')
 
   const label = (
     <span className="inline-flex items-center gap-2">
       <StatusDot tone={meta.tone} />
-      <span>{state === 'cooling' && onlyModels ? `${cooldowns.length} model${cooldowns.length > 1 ? 's' : ''} cooling` : meta.label}</span>
+      <span>
+        {reserved ? 'Reserved' : state === 'cooling' && onlyModels ? `${cooldowns.length} model${cooldowns.length > 1 ? 's' : ''} cooling` : meta.label}
+      </span>
       {until && (
         <span className="text-xs text-muted-foreground">
-          <Countdown until={until} />
+          <Countdown until={until} endLabel={reserved ? 'resuming' : undefined} />
         </span>
       )}
     </span>
   )
 
   const tip =
-    state === 'error' && c.status_message ? (
+    reserved && reserve ? (
+      <span className="block max-w-xs whitespace-normal">{reserveNote(hold, reserve.limits)}</span>
+    ) : state === 'error' && c.status_message ? (
       <span className="block max-w-xs whitespace-normal">{c.status_message}</span>
     ) : state === 'cooling' && cooldowns.length ? (
       <CooldownTooltipBody cooldowns={cooldowns} />

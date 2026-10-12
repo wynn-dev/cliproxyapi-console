@@ -1,3 +1,5 @@
+import type { ReserveWindow } from './limits'
+
 // --- Console server ------------------------------------------------------------------------
 
 export type ProcessState = 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed'
@@ -119,6 +121,21 @@ export interface UsageFacets {
   providers: string[]
   credentials: string[]
   apiKeys: string[]
+}
+
+export interface ReserveStatus {
+  /** Percent of each limit kept back; 0 is off. */
+  limits: Record<ReserveWindow, number>
+  /** Accounts the reserve disabled, or that were enabled by hand while reserved, by credential file name. */
+  accounts: Record<string, ReserveHold>
+}
+
+export interface ReserveHold {
+  /** When the windows below their reserve reset (ms). */
+  until: number
+  windows: ReserveWindow[]
+  /** Enabled by hand while reserved: left alone until `until`. */
+  overridden: boolean
 }
 
 // --- CPA management API -------------------------------------------------------------------

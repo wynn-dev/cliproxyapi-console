@@ -14,6 +14,8 @@ export interface WindowForecast {
   left: number
   /** Accounts in the pool with a reading of this window; the others are left out. */
   read: number
+  /** Of those, readings over 12 hours old. */
+  stale: number
   /** Use per hour, in account-windows, over `basisMs` of history. */
   perHour?: number
   basisMs: number
@@ -66,13 +68,21 @@ export interface CacheBreak {
   resent: number
 }
 
+/** Breaks of one cause, and how many conversations they hit. */
+export interface CauseCount {
+  cause: CacheBreakCause
+  breaks: number
+  sessions: number
+}
+
 export interface CacheBreakDay {
   /** Local midnight (ms) of the viewer's time zone. */
   day: number
   breaks: number
+  /** Conversations that lost their cache that day. */
   sessions: number
   resent: number
-  causes: Partial<Record<CacheBreakCause, number>>
+  causes: CauseCount[]
 }
 
 export interface CacheBreakReport {
@@ -83,7 +93,7 @@ export interface CacheBreakReport {
   breaks: number
   brokenSessions: number
   resent: number
-  causes: { cause: CacheBreakCause; breaks: number }[]
+  causes: CauseCount[]
   days: CacheBreakDay[]
   /** Newest first. */
   recent: CacheBreak[]
@@ -92,7 +102,7 @@ export interface CacheBreakReport {
 export interface DigestAccount {
   name: string
   provider: string
-  /** Highest share of the weekly limit in use at any reading this week, if there was one. */
+  /** Highest share of the weekly limit in use this week; absent when the account served nothing (no reading this week). */
   peakWeekly?: number
   /** Times a window went down to its reserve. */
   reserveHits: number

@@ -60,9 +60,12 @@ export function fmtSpan(ms: number) {
   return h >= 48 ? `${Math.round(h / 24)} days` : h >= 1 ? `${h}h` : `${Math.max(1, Math.round(ms / 60_000))}m`
 }
 
-/** An amount of capacity in account-windows: "60% of an account", "1.4 accounts". */
-export function fmtAccounts(n: number) {
-  return n < 0.995 ? `${Math.round(n * 100)}% of an account` : `${+n.toFixed(1)} account${n >= 1.05 ? 's' : ''}`
+/** An amount of capacity in account-windows: "60% of an account's weekly limit", "1.3 accounts' weekly limits". */
+export function fmtAccounts(n: number, limit = 'weekly limit') {
+  if (n <= 0) return 'none'
+  if (n < 0.005) return `<1% of an account's ${limit}`
+  if (n < 0.995) return `${Math.round(n * 100)}% of an account's ${limit}`
+  return n < 1.05 ? `one account's ${limit}` : `${+n.toFixed(1)} accounts' ${limit}s`
 }
 
 export type Tone = 'good' | 'warn' | 'bad' | 'idle'
@@ -73,7 +76,7 @@ export function weeklySentence(f: WindowForecast, now: number): { text: string; 
   switch (f.status) {
     case 'learning':
       return f.needMs
-        ? { text: `Not enough history yet. The forecast starts once there are 12 hours of limit readings, ${fmtAbout(now + f.needMs, now)}.`, tone: 'idle' }
+        ? { text: `Not enough history yet. The forecast starts once there is a day of limit readings, ${fmtAbout(now + f.needMs, now)}.`, tone: 'idle' }
         : { text: 'No limit readings yet. They come with the next request each account serves.', tone: 'idle' }
     case 'idle':
       return { text: `No weekly use in the last ${fmtSpan(f.basisMs)}.`, tone: 'good' }

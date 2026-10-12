@@ -21,19 +21,21 @@ function lines(d: DigestReport, name: (n: string) => string): Line[] {
     const pool = `${providerLabel(p.provider)} pool`
     if (p.dryMs > 0) {
       const longest = p.dryStretches > 1 ? ` (longest ${hours(p.longestDryMs)})` : ''
-      out.push({ tone: 'warn', text: `${pool} was dry for ${hours(p.dryMs)}${longest}: every account at its reserve or limit. Add capacity.` })
+      // A few minutes between one account running out and the next reset is no reason to buy more.
+      const advice = p.dryMs >= 3_600_000 ? ' Add capacity.' : ''
+      out.push({ tone: 'warn', text: `${pool} was dry for ${hours(p.dryMs)}${longest}: every account at its reserve or limit.${advice}` })
     } else out.push({ tone: 'good', text: `${pool} never ran dry.` })
   }
   // Requests turned away while the pool was dry belong here once usage records them (item 11).
   for (const a of d.accounts) {
-    if (a.peakWeekly === undefined) out.push({ tone: 'info', text: `${name(a.name)} had no limit reading all week.` })
+    if (a.peakWeekly === undefined) out.push({ tone: 'info', text: `${name(a.name)} wasn't used this week.` })
     else if (a.peakWeekly < UNDERUSED) out.push({ tone: 'info', text: `${name(a.name)} never passed ${Math.round(a.peakWeekly * 100)}% of its weekly limit.` })
   }
   const c = d.cacheBreaks
   if (c.breaks) {
     const top = c.causes[0]
     out.push({
-      tone: c.breaks > c.sessions / 10 ? 'warn' : 'info',
+      tone: c.brokenSessions > c.sessions / 10 ? 'warn' : 'info',
       text: `${fmtNumber(c.brokenSessions)} of ${fmtNumber(c.sessions)} conversations lost their prompt cache, ${fmtCompact(c.resent)} tokens sent again. Most often: ${CAUSES[top.cause].label.toLowerCase()}.`,
     })
   } else if (c.sessions) out.push({ tone: 'good', text: `No conversation lost its prompt cache (${fmtNumber(c.sessions)} conversations).` })

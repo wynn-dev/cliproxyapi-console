@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { fmtCompact, fmtDateTime, fmtDuration, fmtNumber } from '@/lib/format'
 import { CAUSES, insightQueries, useAccountNames, type CacheBreak, type CacheBreakReport } from '@/lib/insights'
 
-const chartConfig = { breaks: { label: 'Lost caches', color: 'var(--chart-1)' } } satisfies ChartConfig
+const chartConfig = { sessions: { label: 'Conversations', color: 'var(--chart-1)' } } satisfies ChartConfig
 
 /** Conversations that lost their prompt cache, why, and how often, over the last 7 days. */
 export function CacheBreaksCard() {
@@ -45,13 +45,22 @@ export function CacheBreaksCard() {
                         cursor={{ fill: 'var(--muted)', opacity: 0.6 }}
                         content={<ChartTooltipContent labelFormatter={(_, p) => format(p?.[0]?.payload.day, 'EEE, MMM d')} />}
                       />
-                      <Bar dataKey="breaks" fill="var(--color-breaks)" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="sessions" fill="var(--color-sessions)" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ChartContainer>
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-xs font-medium text-muted-foreground">Causes</h3>
-                  <RankedList items={data.causes.map((c) => ({ key: c.cause, label: CAUSES[c.cause].label, value: c.breaks }))} valueLabel={fmtNumber} />
+                  <RankedList
+                    items={data.causes.map((c) => ({
+                      key: c.cause,
+                      label: CAUSES[c.cause].label,
+                      value: c.sessions,
+                      hint: c.breaks > c.sessions ? `${fmtNumber(c.breaks)} times` : undefined,
+                    }))}
+                    valueLabel={fmtNumber}
+                  />
+                  <p className="text-xs text-muted-foreground">Conversations per cause. Codex caches on a best-effort basis, so it often shows no clear cause.</p>
                 </div>
               </div>
             )}
@@ -74,13 +83,13 @@ export function CacheBreaksCard() {
 
 function Headline({ report: r }: { report: CacheBreakReport }) {
   const today = r.days.at(-1)
-  const top = today && (Object.entries(today.causes) as [keyof typeof CAUSES, number][]).sort((a, b) => b[1] - a[1])[0]
+  const top = today?.causes[0]
   return (
     <div className="space-y-1">
       <p className="text-base font-medium">
         {!today?.sessions
           ? 'No conversation lost its prompt cache today.'
-          : `${fmtNumber(today.sessions)} conversation${today.sessions === 1 ? '' : 's'} lost ${today.sessions === 1 ? 'its' : 'their'} prompt cache today${top ? `; ${CAUSES[top[0]].phrase(top[1])}` : ''}.`}
+          : `${fmtNumber(today.sessions)} conversation${today.sessions === 1 ? '' : 's'} lost ${today.sessions === 1 ? 'its' : 'their'} prompt cache today${top ? `; ${CAUSES[top.cause].phrase(top.sessions)}` : ''}.`}
       </p>
       <p className="text-sm text-muted-foreground">
         {r.breaks

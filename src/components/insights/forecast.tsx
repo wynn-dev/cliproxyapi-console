@@ -58,15 +58,21 @@ function PoolRow({ pool: p, now, reserve }: { pool: PoolForecast; now: number; r
       </div>
       {w.status !== 'learning' && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-          <Fact
-            label="Left above the reserve"
-            value={fmtAccounts(w.left)}
-            hint={`Weekly limits, counted down to the ${reserve}% reserve. One account is one account's whole weekly limit.`}
-          />
-          {hasPace && <Fact label="Pace" value={`${fmtAccounts(w.perHour! * 24)} a day`} hint="Weekly limit used per day by all accounts together, owners' own use included." />}
-          {hasPace && <Fact label="Based on" value={`Last ${fmtSpan(w.basisMs)}`} />}
-          {w.read < p.accounts && (
-            <Fact label="Readings" value={`${w.read} of ${p.accounts} accounts`} hint="Accounts without a limit reading are left out until they serve a request." />
+          <Fact label="Left above the reserve" value={fmtAccounts(w.left)} hint={`Weekly limits of the accounts in the pool, counted down to the ${reserve}% reserve.`} />
+          {hasPace && (
+            <Fact
+              label="Pace"
+              value={`${fmtAccounts(w.perHour! * 24)} a day`}
+              hint="Weekly limit used per day by all accounts together, as far as the console has seen it."
+            />
+          )}
+          {hasPace && <Fact label="Based on" value={`Last ${fmtSpan(w.basisMs)}`} hint="Time the pool was dry doesn't count." />}
+          {(w.read < p.accounts || w.stale > 0) && (
+            <Fact
+              label="Readings"
+              value={[w.read < p.accounts && `${w.read} of ${p.accounts} accounts`, w.stale > 0 && `${w.stale} over 12h old`].filter(Boolean).join(' · ')}
+              hint="An account only reports its limits when it serves a request, so idle accounts have old readings or none. Turning on idle account limits (Settings → Routing) keeps them fresh."
+            />
           )}
         </dl>
       )}
@@ -96,25 +102,25 @@ function Fact({ label, value, hint }: { label: string; value: React.ReactNode; h
 }
 
 /**
- * The forecast in a line per provider, for the Overview. Shows nothing until there is a forecast,
- * so a new install's Overview stays quiet.
+ * The forecast in a line per provider, for the Overview. Shows nothing until there is a forecast
+ * or the 5-hour limits run short, so a new install's Overview stays quiet.
  */
 export function ForecastLine() {
   const { data } = useQuery(insightQueries.forecast())
   const now = useNow(60_000)
   const lines = (data?.providers ?? [])
-    .filter((p) => p.weekly.status !== 'learning')
-    .map((p) => ({ provider: p.provider, weekly: weeklySentence(p.weekly, now), fiveHour: fiveHourSentence(p.fiveHour, now) }))
+    .map((p) => ({ provider: p.provider, weekly: p.weekly.status === 'learning' ? undefined : weeklySentence(p.weekly, now), fiveHour: fiveHourSentence(p.fiveHour, now) }))
+    .filter((l) => l.weekly || l.fiveHour)
   if (!lines.length) return null
   return (
     <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl px-4 py-3 text-sm ring-1 ring-foreground/10">
       <ul className="min-w-0 flex-1 basis-full space-y-1 sm:basis-0">
         {lines.map((l) => (
           <li key={l.provider} className="flex items-baseline gap-2">
-            <StatusDot tone={l.weekly.tone} className="translate-y-[-1px]" />
+            <StatusDot tone={l.weekly?.tone ?? 'warn'} className="translate-y-[-1px]" />
             <span>
-              <span className="font-medium">{providerLabel(l.provider)}:</span> {l.weekly.text}
-              {l.fiveHour && <span className="text-muted-foreground"> {l.fiveHour}</span>}
+              <span className="font-medium">{providerLabel(l.provider)}:</span> {l.weekly?.text}
+              {l.fiveHour && <span className={l.weekly ? 'text-muted-foreground' : undefined}> {l.fiveHour}</span>}
             </span>
           </li>
         ))}

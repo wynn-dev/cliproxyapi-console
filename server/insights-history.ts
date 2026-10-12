@@ -6,16 +6,23 @@ import { reserveStatus } from './reserve.ts'
 
 export const POOL_PROVIDERS = ['claude', 'codex']
 
-/**
- * The accounts each provider can draw on: enabled ones, and ones the reserve holds back until a
- * reset. An account disabled by hand is out of the pool.
- */
-export function pools() {
+export interface ProviderAccount {
+  name: string
+  priority: number
+  /**
+   * Whether the provider can draw on it: enabled, or held back by the console until a reset. An
+   * account disabled by hand is out of the pool, though its use still counts towards the pace.
+   */
+  inPool: boolean
+}
+
+/** Every Claude and Codex account CPA lists, by provider. */
+export function accounts() {
   const held = reserveStatus().accounts
-  const out = new Map<string, { name: string; priority: number }[]>(POOL_PROVIDERS.map((p) => [p, []]))
+  const out = new Map<string, ProviderAccount[]>(POOL_PROVIDERS.map((p) => [p, []]))
   for (const c of listedCredentials()) {
-    if (!c.provider || !out.has(c.provider) || (c.disabled && !held[c.name])) continue
-    out.get(c.provider)!.push({ name: c.name, priority: c.priority ?? 0 })
+    if (!c.provider || !out.has(c.provider)) continue
+    out.get(c.provider)!.push({ name: c.name, priority: c.priority ?? 0, inPool: !c.disabled || !!held[c.name] })
   }
   return out
 }
@@ -57,18 +64,54 @@ export function leftAt(s: LimitSample, t: number) {
 const RESET_SLACK_MS = 60_000
 
 /**
- * Share of a window used across its samples. Rises add up; after a reset, use starts again from
- * zero; a drop without a reset (the provider correcting itself) counts as nothing. Gaps between
- * samples don't matter: the next reading still shows what was used meanwhile.
+ * Share of a window used from `from` on. Rises add up; after a reset, use starts again from zero; a
+ * drop without a reset (the provider correcting itself) counts as nothing. Gaps don't matter: the
+ * next reading still shows what was used meanwhile. A rise that started before `from` (from the
+ * sample before it) counts in proportion to the part of it after `from`.
  */
-export function usedAcross(samples: LimitSample[]) {
+export function usedSince(samples: LimitSample[], from: number) {
   let total = 0
   for (let i = 1; i < samples.length; i++) {
     const [a, b] = [samples[i - 1], samples[i]]
+    if (b.ts <= from) continue
     const reset =
       (a.resetsAt !== null && b.ts >= a.resetsAt) ||
       (b.used! < a.used! && a.resetsAt !== null && b.resetsAt !== null && b.resetsAt - a.resetsAt > RESET_SLACK_MS)
-    total += reset ? b.used! : Math.max(0, b.used! - a.used!)
+    const rise = reset ? b.used! : Math.max(0, b.used! - a.used!)
+    total += a.ts >= from ? rise : (rise * (b.ts - from)) / (b.ts - a.ts)
   }
   return total
+}
+
+const KINDS: ReserveWindow[] = ['5h', 'weekly']
+const STEP = 5 * 60_000
+
+/**
+ * Time in [from, to) the pool was dry: every account that had a reading by then at its reserve or
+ * limit. An account only counts from its first sample, so history needs the sample before `from`.
+ */
+export function dryTime(names: string[], history: ReturnType<typeof byAccount>, reserve: Record<ReserveWindow, number>, from: number, to: number) {
+  const out = { dryMs: 0, longestDryMs: 0, dryStretches: 0 }
+  let stretch = 0
+  for (let t = from; t < to; t += STEP) {
+    let known = false
+    let free = false
+    for (const name of names) {
+      const windows = KINDS.map((kind) => ({ kind, s: sampleAt(history.get(name)?.[kind], t) })).filter((w) => w.s)
+      if (!windows.length) continue
+      known = true
+      if (windows.every(({ kind, s }) => leftAt(s!, t) > reserve[kind] / 100 + 1e-9)) {
+        free = true
+        break
+      }
+    }
+    const step = Math.min(STEP, to - t)
+    if (known && !free) {
+      if (!stretch) out.dryStretches++
+      stretch += step
+      out.dryMs += step
+      out.longestDryMs = Math.max(out.longestDryMs, stretch)
+    } else stretch = 0
+  }
+  return out
 }

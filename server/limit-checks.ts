@@ -21,11 +21,16 @@ const MAX_BACKOFF_MS = 6 * 3600_000
 /** Failed checks wait 20m, 40m, 80m… before the next try. */
 const backoff = (failures: number) => Math.min(MAX_BACKOFF_MS, STALE_MS * 2 ** failures)
 
-/** For tests only: points the checks at a mock upstream instead of the real providers. */
+/**
+ * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point the checks at a
+ * mock instead of the real providers. Not a user option.
+ */
 const USAGE_URL: Record<string, string> = {
   claude: process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || 'https://api.anthropic.com/api/oauth/usage',
   codex: process.env.CPA_CONSOLE_CODEX_USAGE_URL || 'https://chatgpt.com/backend-api/wham/usage',
 }
+/** A local mock is reached directly, not through the account's proxy. */
+const MOCKED = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL)
 /** CPA's default Claude Code fingerprint, so the check looks like the account's other traffic. */
 const CLAUDE_USER_AGENT = 'claude-cli/2.1.280 (external, cli)'
 
@@ -176,6 +181,10 @@ function carried(provider: string, prev: Record<string, string> | undefined, fre
   return Object.fromEntries(Object.entries(prev ?? {}).filter(([k]) => !owned.some((p) => k.toLowerCase().startsWith(p))))
 }
 
+/** Header-name case as CPA stores signals (Go's canonical form), for readers that look keys up as is. */
+const canonical = (signals: Record<string, string>) =>
+  Object.fromEntries(Object.entries(signals).map(([k, v]) => [k.replace(/(^|-)([a-z])/g, (_, sep: string, c: string) => sep + c.toUpperCase()), v]))
+
 /** The upstream's own error message, if it sent one. */
 function upstreamError(body: string | undefined) {
   try {
@@ -208,7 +217,7 @@ async function check(f: Listed, prev: Row | undefined, reading: Record<string, s
   }
   let res: Response | undefined
   try {
-    res = await management('/requests/api-call', { method: 'POST', body: { auth_index: f.auth_index, method: 'GET', url: USAGE_URL[provider], header } })
+    res = await management('/requests/api-call', { method: 'POST', body: { auth_index: f.auth_index, method: 'GET', url: USAGE_URL[provider], header, ...(MOCKED && { proxy_url: 'direct' }) } })
   } catch (err) {
     return fail(f.name, prev, now, 0, `No answer: ${(err as Error).message}`)
   }
@@ -229,7 +238,7 @@ async function check(f: Listed, prev: Row | undefined, reading: Record<string, s
   }
   const signals = provider === 'claude' ? claudeSignals(body) : codexSignals(body)
   if (!Object.keys(signals).length) return fail(f.name, prev, now, status, 'The answer had no limits in it')
-  saveReading(f.name, now, { ...carried(provider, reading, signals), ...signals })
+  saveReading(f.name, now, { ...carried(provider, reading, signals), ...canonical(signals) })
   saveRow.run(f.name, now, now, 0, 0, '')
   if (prev?.failures) console.log(`Limit check: ${f.name} works again`)
 }

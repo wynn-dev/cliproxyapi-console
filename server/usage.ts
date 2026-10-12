@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
-import { LONG_CONTEXT_STEPS, type PricedTokens, apiValue } from './api-prices.ts'
+import { LONG_CONTEXT_STEPS, apiValue, priceFor } from './api-prices.ts'
 import { keyMatchesConfig } from './auth.ts'
 import { env, paths } from './env.ts'
 import { readState } from './state.ts'
@@ -17,6 +17,7 @@ export const db = new DatabaseSync(paths.usageDb)
 fs.chmodSync(paths.usageDb, 0o600)
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA temp_store = MEMORY;
   CREATE TABLE IF NOT EXISTS requests (
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -377,21 +378,53 @@ function where(f: UsageFilter) {
   return w
 }
 
+/**
+ * Reading most of the table through the ts index is many times slower than scanning all of it, so
+ * wide ranges scan. Counting the rows in range only reads the index, which is cheap.
+ */
+function source(from: number, to: number) {
+  const { rows, inRange } = db
+    .prepare('SELECT (SELECT COUNT(*) FROM requests) AS rows, (SELECT COUNT(*) FROM requests WHERE ts >= ? AND ts < ?) AS inRange')
+    .get(from, to) as { rows: number; inRange: number }
+  return inRange * 10 > rows ? 'requests NOT INDEXED' : 'requests'
+}
+
 /** The same filter for turned-away requests, which never reached a credential or succeeded. */
 const whereTurnedAway = (f: UsageFilter) => filterSql(f, [(!!f.authIndex || f.status === 'ok') && '0'])
 
-/** One row per client request (or per attempt), from its attempts. */
-const PER_REQUEST = `
-  MIN(failed) AS failed, COUNT(*) AS attempts, SUM(failed) AS failedAttempts,
-  SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(reasoning_tokens) AS reasoning,
-  SUM(cached_tokens) AS cached, SUM(cache_write_tokens) AS cacheWrite, SUM(total_tokens) AS total,
-  SUM(latency_ms) AS latency, SUM(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS ttft,
-  SUM(stream = 1 AND ttft_ms > 0) AS ttftCount`
+// API-price value of an attempt, for SQL: node:sqlite calls back into JS per row.
+const priced = new Map<string, boolean>()
+db.function('api_priced', { deterministic: true }, (model) => {
+  const m = String(model)
+  if (!priced.has(m)) priced.set(m, !!priceFor(m))
+  return priced.get(m) ? 1 : 0
+})
+db.function('api_value', { deterministic: true }, (model, tier, uncached, cacheRead, cacheWrite, output, input) => {
+  const band = LONG_CONTEXT_STEPS.filter((n) => Number(input) > n).length
+  const tokens = { uncached: Number(uncached), cacheRead: Number(cacheRead), cacheWrite: Number(cacheWrite), output: Number(output) }
+  return apiValue(String(model), String(tier), tokens, band) ?? null
+})
+const PRICE_MODEL = "COALESCE(NULLIF(response_model, ''), model)"
+const VALUE = `api_value(${PRICE_MODEL}, COALESCE(NULLIF(response_service_tier, ''), service_tier),
+  MAX(input_tokens - cached_tokens - cache_write_tokens, 0), cached_tokens, cache_write_tokens, output_tokens, input_tokens)`
+const UNPRICED = `CASE WHEN api_priced(${PRICE_MODEL}) THEN 0 ELSE input_tokens + output_tokens END`
 
+/** Sums over attempts, for one client request or one credential. */
+const ATTEMPT_SUMS = `
+  COUNT(*) AS attempts, TOTAL(failed) AS failedAttempts,
+  TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output, TOTAL(reasoning_tokens) AS reasoning,
+  TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite, TOTAL(total_tokens) AS total,
+  TOTAL(latency_ms) AS latency, TOTAL(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS ttft,
+  TOTAL(stream = 1 AND ttft_ms > 0) AS ttftCount, TOTAL(${VALUE}) AS value, TOTAL(${UNPRICED}) AS unpricedTokens`
+
+/**
+ * Metrics from rows of ATTEMPT_SUMS. With one row per client request, a request failed when all its
+ * attempts did; with one row per attempt (credentials) that is just the attempt failing.
+ */
 const METRICS = `
   COUNT(*) AS requests,
-  TOTAL(failed) AS failed,
-  TOTAL(failed = 0 AND failedAttempts > 0) AS recovered,
+  TOTAL(failedAttempts = attempts) AS failed,
+  TOTAL(failedAttempts > 0 AND failedAttempts < attempts) AS recovered,
   TOTAL(attempts) AS attempts,
   TOTAL(failedAttempts) AS failedAttempts,
   TOTAL(input) AS input,
@@ -401,43 +434,14 @@ const METRICS = `
   TOTAL(cacheWrite) AS cacheWrite,
   TOTAL(total) AS total,
   TOTAL(latency) / TOTAL(attempts) AS avgLatency,
-  TOTAL(ttft) / TOTAL(ttftCount) AS avgTtft`
+  TOTAL(ttft) / TOTAL(ttftCount) AS avgTtft,
+  TOTAL(value) AS value,
+  TOTAL(unpricedTokens) AS unpricedTokens`
 
 interface Metrics {
   requests: number
   failed: number
-  turnedAway: number
-  value: number
-  /** Tokens of models without a price, left out of value. */
-  unpricedTokens: number
   [k: string]: unknown
-}
-
-const BAND = LONG_CONTEXT_STEPS.map((n) => `(input_tokens > ${n})`).join(' + ') || '0'
-
-/** API-price value per key, from the cache-aware tokens of each model, tier and context size. */
-function values(w: { sql: string; params: SQLInputValue[] }, col?: string) {
-  const rows = db
-    .prepare(
-      `SELECT ${col ?? "''"} AS key, COALESCE(NULLIF(response_model, ''), model) AS model,
-        COALESCE(NULLIF(response_service_tier, ''), service_tier) AS tier, ${BAND} AS band,
-        TOTAL(MAX(input_tokens - cached_tokens - cache_write_tokens, 0)) AS uncached, TOTAL(cached_tokens) AS cacheRead,
-        TOTAL(cache_write_tokens) AS cacheWrite, TOTAL(output_tokens) AS output
-       FROM requests WHERE ${w.sql} GROUP BY 1, 2, 3, 4`,
-    )
-    .all(...w.params) as unknown as ({ key: string; model: string; tier: string; band: number } & PricedTokens)[]
-  const out = new Map<string, { value: number; unpricedTokens: number; unpricedModels: Set<string> }>()
-  for (const r of rows) {
-    const v = out.get(r.key) ?? { value: 0, unpricedTokens: 0, unpricedModels: new Set<string>() }
-    const usd = apiValue(r.model, r.tier, r, r.band)
-    if (usd !== undefined) v.value += usd
-    else if (r.uncached + r.cacheRead + r.cacheWrite + r.output > 0) {
-      v.unpricedTokens += r.uncached + r.cacheRead + r.cacheWrite + r.output
-      v.unpricedModels.add(r.model)
-    }
-    out.set(r.key, v)
-  }
-  return out
 }
 
 const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_000, 86_400_000]
@@ -445,73 +449,76 @@ const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_0
 export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
   const w = where(f)
   const ta = whereTurnedAway(f)
+  const src = source(f.from, f.to)
   const bucket = BUCKETS.find((b) => (f.to - f.from) / b <= 120) ?? 86_400_000
   const shift = -tzOffsetMin * 60_000 // align day buckets to the viewer's local midnight
-  // node:sqlite binds JS numbers as REAL; BigInt keeps the bucket math in integer division.
-  const bucketParams = [BigInt(shift), BigInt(bucket), BigInt(bucket), BigInt(shift)]
   const turnedAway = (col: string) =>
     new Map(
       (db.prepare(`SELECT ${col} AS key, COUNT(*) AS n FROM turned_away WHERE ${ta.sql} GROUP BY 1`).all(...ta.params) as { key: string | number; n: number }[]).map(
         (r) => [r.key, r.n],
       ),
     )
-  const withExtras = (m: Record<string, unknown>, key: string, away: Map<string | number, number>, value: ReturnType<typeof values>) => {
-    const n = away.get(key) ?? 0
-    const v = value.get(key)
-    return { ...m, requests: Number(m.requests) + n, failed: Number(m.failed) + n, turnedAway: n, value: v?.value ?? 0, unpricedTokens: v?.unpricedTokens ?? 0 } as Metrics
-  }
+  const withTurnedAway = (m: Metrics, n = 0) => ({ ...m, requests: m.requests + n, failed: m.failed + n, turnedAway: n })
 
-  const totalsRow = db.prepare(`WITH r AS (SELECT ${PER_REQUEST} FROM requests WHERE ${w.sql} GROUP BY ${REQUEST_KEY}) SELECT ${METRICS} FROM r`).get(...w.params)!
-  const totalValue = values(w)
-  const totals = { ...withExtras(totalsRow, '', turnedAway("''"), totalValue), unpricedModels: [...(totalValue.get('')?.unpricedModels ?? [])].sort() }
+  // One row per client request, built once. Bare columns come from its first attempt (SQLite takes
+  // them from the MIN(ts) row), so a request belongs to the model, provider and key it started with.
+  db.exec('DROP TABLE IF EXISTS temp.client_requests')
+  db.prepare(
+    `CREATE TEMP TABLE client_requests AS SELECT MIN(ts) AS ts, model, provider, api_key, ${ATTEMPT_SUMS}
+     FROM ${src} WHERE ${w.sql} GROUP BY ${REQUEST_KEY}`,
+  ).run(...w.params)
+  try {
+    const totals = {
+      ...withTurnedAway(db.prepare(`SELECT ${METRICS} FROM client_requests`).get() as Metrics, turnedAway("''").get('')),
+      unpricedModels: (db.prepare('SELECT DISTINCT model FROM client_requests WHERE unpricedTokens > 0 ORDER BY 1').all() as { model: string }[]).map((r) => r.model),
+    }
 
-  const rows = db
-    .prepare(
-      `WITH r AS (SELECT MIN(ts) AS ts, ${PER_REQUEST} FROM requests WHERE ${w.sql} GROUP BY ${REQUEST_KEY})
-       SELECT ((ts + ?) / ?) * ? - ? AS t, COUNT(*) AS requests, TOTAL(failed) AS failed, TOTAL(input) AS input,
-        TOTAL(output) AS output, TOTAL(cached) AS cached, TOTAL(cacheWrite) AS cacheWrite, TOTAL(total) AS total,
-        TOTAL(latency) / TOTAL(attempts) AS avgLatency
-       FROM r GROUP BY t ORDER BY t`,
-    )
-    .all(...w.params, ...bucketParams) as { t: number; requests: number; failed: number }[]
-  const byT = new Map(rows.map((r) => [r.t, r]))
-  const awayByT = turnedAway(`((ts + ${shift}) / ${bucket}) * ${bucket} - ${shift}`)
-  const series = []
-  const start = Math.floor((f.from + shift) / bucket) * bucket - shift
-  for (let t = start; t < f.to; t += bucket) {
-    const p = byT.get(t) ?? { t, requests: 0, failed: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0, avgLatency: null }
-    const n = awayByT.get(t) ?? 0
-    series.push({ ...p, requests: p.requests + n, failed: p.failed + n, turnedAway: n })
-  }
-
-  /** Per credential rows count attempts; the rest count client requests. Turned-away requests have no credential. */
-  const group = (col: string, perAttempt = false) => {
-    const metrics = db
+    const rows = db
       .prepare(
-        `WITH r AS (SELECT ${col} AS key, ${PER_REQUEST} FROM requests WHERE ${w.sql} GROUP BY 1, ${perAttempt ? 'id' : REQUEST_KEY})
-         SELECT key, ${METRICS} FROM r GROUP BY key ORDER BY requests DESC LIMIT 50`,
+        `SELECT ((ts + ?) / ?) * ? - ? AS t, COUNT(*) AS requests, TOTAL(failedAttempts = attempts) AS failed, TOTAL(input) AS input,
+          TOTAL(output) AS output, TOTAL(cached) AS cached, TOTAL(cacheWrite) AS cacheWrite, TOTAL(total) AS total,
+          TOTAL(latency) / TOTAL(attempts) AS avgLatency
+         FROM client_requests GROUP BY t ORDER BY t`,
       )
-      .all(...w.params) as { key: string }[]
-    const away = perAttempt ? new Map<string, number>() : turnedAway(col)
-    const value = values(w, col)
-    const out = metrics.map((m) => withExtras(m, m.key, away, value))
-    for (const key of away.keys()) if (!metrics.some((m) => m.key === key)) out.push(withExtras({ key, ...EMPTY }, String(key), away, value))
-    return out.sort((a, b) => b.requests - a.requests)
-  }
-  return {
-    bucketMs: bucket,
-    totals,
-    series,
-    byModel: group('model'),
-    byProvider: group('provider'),
-    byCredential: group('auth_index', true),
-    byApiKey: group('api_key'),
+      // node:sqlite binds JS numbers as REAL; BigInt keeps the bucket math in integer division.
+      .all(BigInt(shift), BigInt(bucket), BigInt(bucket), BigInt(shift)) as { t: number; requests: number; failed: number }[]
+    const byT = new Map(rows.map((r) => [r.t, r]))
+    const awayByT = turnedAway(`((ts + ${shift}) / ${bucket}) * ${bucket} - ${shift}`)
+    const series = []
+    const start = Math.floor((f.from + shift) / bucket) * bucket - shift
+    for (let t = start; t < f.to; t += bucket) {
+      const p = byT.get(t) ?? { t, requests: 0, failed: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0, avgLatency: null }
+      series.push(withTurnedAway(p, awayByT.get(t)))
+    }
+
+    const group = (col: string) => {
+      const metrics = db.prepare(`SELECT ${col} AS key, ${METRICS} FROM client_requests GROUP BY 1 ORDER BY requests DESC LIMIT 50`).all() as (Metrics & { key: string })[]
+      const away = turnedAway(col)
+      const out = metrics.map((m) => withTurnedAway(m, away.get(m.key)))
+      for (const [key, n] of away) if (!metrics.some((m) => m.key === key)) out.push(withTurnedAway({ key: String(key), ...EMPTY }, n))
+      return out.sort((a, b) => b.requests - a.requests)
+    }
+    // Attempts, so an account shows the attempts that failed on it. Turned-away requests never reached one.
+    const byCredential = db
+      .prepare(
+        `SELECT auth_index AS key, COUNT(*) AS requests, TOTAL(failed) AS failed, 0 AS recovered, COUNT(*) AS attempts,
+          TOTAL(failed) AS failedAttempts, TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output,
+          TOTAL(reasoning_tokens) AS reasoning, TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite,
+          TOTAL(total_tokens) AS total, AVG(latency_ms) AS avgLatency, AVG(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS avgTtft,
+          TOTAL(${VALUE}) AS value, TOTAL(${UNPRICED}) AS unpricedTokens
+         FROM ${src} WHERE ${w.sql} GROUP BY 1 ORDER BY requests DESC LIMIT 50`,
+      )
+      .all(...w.params)
+      .map((m) => withTurnedAway(m as Metrics))
+    return { bucketMs: bucket, totals, series, byModel: group('model'), byProvider: group('provider'), byCredential, byApiKey: group('api_key') }
+  } finally {
+    db.exec('DROP TABLE temp.client_requests')
   }
 }
 
 const EMPTY = {
   requests: 0, failed: 0, recovered: 0, attempts: 0, failedAttempts: 0, input: 0, output: 0, reasoning: 0,
-  cached: 0, cacheWrite: 0, total: 0, avgLatency: null, avgTtft: null,
+  cached: 0, cacheWrite: 0, total: 0, avgLatency: null, avgTtft: null, value: 0, unpricedTokens: 0,
 }
 
 /** Newest first. Attempts and turned-away requests (negative ids) share one list, paged by (ts, id). */
@@ -560,11 +567,12 @@ export function usageRequests(f: UsageFilter, limit: number, before?: { ts: numb
 }
 
 export function usageFacets(from: number, to: number) {
+  const src = source(from, to)
   const distinct = (col: string, turnedAway = true) =>
     (
       db
         .prepare(
-          `SELECT ${col} AS v FROM requests WHERE ts >= ? AND ts < ? AND ${col} != ''` +
+          `SELECT DISTINCT ${col} AS v FROM ${src} WHERE ts >= ? AND ts < ? AND ${col} != ''` +
             (turnedAway ? ` UNION SELECT ${col} FROM turned_away WHERE ts >= ? AND ts < ? AND ${col} != ''` : '') +
             ' ORDER BY v',
         )

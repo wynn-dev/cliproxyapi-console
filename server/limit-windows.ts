@@ -125,8 +125,18 @@ export function extraUsage(provider: string, reading: LimitReading | undefined, 
   // Retry-After comes with a rejected request, which was not billed.
   if (!BILLING.has(s[`${p}overage-status`]) || s['retry-after']) return undefined
 
-  const rejected = s[`${p}status`] === 'rejected'
   const windows = limitWindows(provider, reading, now)
+  // A model-scoped window (Fable) that ran out turns the overall status `rejected` too. With both
+  // shared windows reported and allowed, and the representative claim not naming one, only that
+  // model bills, and the Fable reserve holds just that model (fable.ts). Callers only ask while
+  // extra-usage holds are on, which the Fable hold follows too.
+  const shared = windows.filter((w) => SHARED.has(w.id))
+  const sharedOk =
+    shared.length === SHARED.size &&
+    shared.every((w) => w.level !== 'exhausted' && s[`${p}${w.id}-status`] !== 'rejected') &&
+    !/(^|[^a-z_])(5h|7d|five_hour|seven_day)($|[^a-z_])/.test(s[`${p}representative-claim`] ?? '')
+  const modelOnly = sharedOk && windows.some((w) => !SHARED.has(w.id) && w.level === 'exhausted')
+  const rejected = s[`${p}status`] === 'rejected' && !modelOnly
   // Every response carries every window, so a model-scoped window that ran out only means billing
   // while the overall status says so too.
   const out = windows.filter((w) => w.level === 'exhausted' && w.resetsAt !== undefined && (SHARED.has(w.id) || rejected))

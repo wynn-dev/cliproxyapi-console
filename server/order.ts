@@ -243,7 +243,7 @@ export async function applyOrder(files: Listed[], readings: Record<string, Limit
         row = { ...row, original: current }
         saveRow(row)
       }
-      const p = place(provider, readings[f.name], row.held, !!overrides[f.name]?.overridden, limits, now)
+      const p = place(provider, readings[f.name], row.held, !!overrides[f.name]?.overridden && !overrides[f.name]?.released, limits, now)
       const held = p.tier === 'held' ? p.windows : []
       if (held.join() !== row.held.join()) {
         row = { ...row, held }

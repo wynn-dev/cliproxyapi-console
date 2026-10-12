@@ -37,8 +37,8 @@ export function LimitChecksSection({ onDirty }: { onDirty: DirtyReporter }) {
         description={
           <>
             About every 10 minutes, the console asks Anthropic or OpenAI for the limits of each Claude and Codex account that hasn't served a
-            request in that time. It uses the usage pages Claude Code and Codex read their own usage from. They're undocumented, and calling them
-            like this is a terms-of-service grey area.
+            request in that time, signed in as that account. It uses the usage pages Claude Code and Codex read their own usage from. They're
+            undocumented, and calling them like this is a terms-of-service grey area.
             <Default>off</Default>
           </>
         }

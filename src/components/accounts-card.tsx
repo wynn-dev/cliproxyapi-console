@@ -7,7 +7,7 @@ import { CredentialSheet } from '@/components/credentials/credential-sheet'
 import { accountName, credState, reserveHold, reserveNote, useAccountParam } from '@/components/credentials/lib'
 import { ModelsDialog } from '@/components/credentials/models-dialog'
 import { CredentialStatus, SignInHint } from '@/components/credentials/status'
-import { AccountMeters } from '@/components/limit-meter'
+import { AccountMeters, PoolWeeklyMeter } from '@/components/limit-meter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
 import { fmtAgo } from '@/lib/format'
-import { accountReadings, limitWindows } from '@/lib/limits'
+import { accountReadings, limitWindows, poolWeekly } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
@@ -42,6 +42,19 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
   const setOpen = useAccountParam(account, credentials.data?.files)
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
+  // The pool the forecast counts: accounts on, and those the console holds back, other than signed-out
+  // ones. Which accounts are held is only known once the reserve status is in.
+  const pools = poolWeekly(
+    reserve.data
+      ? accounts.flatMap((c) => {
+          const hold = reserve.data.accounts[c.name]
+          if (!PROVIDER_ORDER.includes(c.provider) || (c.disabled && (!hold || hold.reason === 'signed-out'))) return []
+          const weeklyHold = hold && (hold.windows as string[]).some((w) => w === 'weekly' || w === 'Weekly') ? hold.until : undefined
+          return [{ provider: c.provider, reading: accountReadings(c.quota, stored.data?.[c.name]).reading, weeklyHold }]
+        })
+      : [],
+    now,
+  ).filter((p) => p.accounts > 1)
 
   return (
     <Card>
@@ -73,6 +86,19 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
           </Empty>
         ) : (
           <>
+            {pools.length > 0 && (
+              <div className="grid items-start gap-x-8 gap-y-3 border-b pb-4 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">All accounts</div>
+                  <div className="text-sm text-muted-foreground">Weekly limits added up, per provider</div>
+                </div>
+                <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {pools.map((p) => (
+                    <PoolWeeklyMeter key={p.provider} pool={p} reserve={reserve.data?.limits.weekly} now={now} />
+                  ))}
+                </div>
+              </div>
+            )}
             <ul className="divide-y">
               {accounts.map((c) => (
                 <AccountRow

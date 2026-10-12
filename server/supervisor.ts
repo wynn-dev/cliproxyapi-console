@@ -1,6 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import readline from 'node:readline'
-import { binaryPath, installProgress, installedVersion } from './binary.ts'
+import { binaryPath, installedVersion } from './binary.ts'
 import { readCpaConfig } from './cpa-config.ts'
 import { paths } from './env.ts'
 import { readState, updateState } from './state.ts'
@@ -31,10 +31,12 @@ class Supervisor {
   restarts = 0
   lastExit: { code: number | null; signal: string | null; at: number } | undefined
   lastError: string | undefined
-  /** Last liveness check while running. */
-  lastCheck: { ok: boolean; at: number } | undefined
+  /** Last liveness check while running, and since when checks have been failing. */
+  lastCheck: { ok: boolean; at: number; failingSince?: number } | undefined
   /** When CPA was last restarted because it stopped answering while its process was still alive. */
   lastHangAt: number | undefined
+  /** Whether the current run was started by that restart. */
+  startedAfterHang = false
 
   private child: ChildProcess | undefined
   private lines: OutputLine[] = []
@@ -54,7 +56,7 @@ class Supervisor {
     if (this.lines.length > MAX_LINES) this.lines.splice(0, this.lines.length - MAX_LINES)
   }
 
-  start() {
+  start(afterHang = false) {
     clearTimeout(this.restartTimer)
     if (this.child) return
     if (!installedVersion()) {
@@ -66,6 +68,7 @@ class Supervisor {
     this.lastCheck = undefined
     this.failedChecks = 0
     this.hung = false
+    this.startedAfterHang = afterHang
     this.port = readCpaConfig()?.port
     this.log('console', `Starting CLIProxyAPI ${installedVersion()}`)
 
@@ -101,9 +104,10 @@ class Supervisor {
           // Reset backoff after a healthy run; otherwise back off up to 30s. A hang is never healthy.
           if (!this.hung && this.startedAt && Date.now() - this.startedAt > 60_000) this.backoffMs = 1000
           this.log('console', `Restarting in ${this.backoffMs / 1000}s`)
+          const afterHang = this.hung
           this.restartTimer = setTimeout(() => {
             this.restarts++
-            this.start()
+            this.start(afterHang)
           }, this.backoffMs)
           this.backoffMs = Math.min(this.backoffMs * 2, 30_000)
         }
@@ -158,7 +162,7 @@ class Supervisor {
 
   /**
    * Restarts CPA when its process is alive but has stopped answering HTTP, which exit-based
-   * restarts never catch. Checks pause outside `running` and while a CPA update is installing.
+   * restarts never catch. Checks pause outside `running` (an update stops CPA before swapping it).
    */
   private async watch(child: ChildProcess) {
     let next = Date.now()
@@ -166,11 +170,11 @@ class Supervisor {
       // Fixed cadence, so slow checks don't stretch the time to a restart (but no catch-up burst after a sleep).
       next = Math.max(next + CHECK_INTERVAL_MS, Date.now())
       await new Promise((r) => setTimeout(r, Math.max(0, next - Date.now())).unref())
-      const install = installProgress()?.phase
-      if (this.child !== child || this.state !== 'running' || (install && install !== 'done' && install !== 'error')) continue
+      if (this.child !== child || this.state !== 'running') continue
       const ok = await this.ping(CHECK_TIMEOUT_MS)
       if (this.child !== child || this.state !== 'running') continue
-      this.lastCheck = { ok, at: Date.now() }
+      const at = Date.now()
+      this.lastCheck = { ok, at, failingSince: ok ? undefined : (this.lastCheck?.failingSince ?? at) }
       if (ok) {
         if (this.failedChecks) this.log('console', 'CLIProxyAPI is answering again')
         this.failedChecks = 0
@@ -190,10 +194,11 @@ class Supervisor {
     }
   }
 
+  /** Any HTTP answer counts, including a 404 from a CPA without /healthz. CPA does not log successful /healthz hits. */
   private async ping(timeoutMs = 1000) {
     if (!this.port) return false
     try {
-      await fetch(`http://127.0.0.1:${this.port}/`, { signal: AbortSignal.timeout(timeoutMs) })
+      await fetch(`http://127.0.0.1:${this.port}/healthz`, { method: 'HEAD', signal: AbortSignal.timeout(timeoutMs) })
       return true
     } catch {
       return false
@@ -231,6 +236,7 @@ class Supervisor {
       lastError: this.lastError,
       lastCheck: this.lastCheck,
       lastHangAt: this.lastHangAt,
+      startedAfterHang: this.startedAfterHang,
     }
   }
 }

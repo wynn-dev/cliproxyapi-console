@@ -26,6 +26,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { auth } from '@/lib/api'
 import { queries } from '@/lib/queries'
@@ -71,6 +72,9 @@ export function AppSidebar() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const pathname = useLocation({ select: (l) => l.pathname })
+  // On phones the sidebar is a sheet over the page; close it once a page is picked.
+  const { setOpenMobile } = useSidebar()
+  const close = () => setOpenMobile(false)
   const state = status?.process.state
   const p = state ? PROCESS_LABEL[state] : undefined
 
@@ -80,7 +84,7 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
+              <Link to="/" onClick={close}>
                 <Logo className="size-8 shrink-0" />
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="truncate font-semibold">CPA Console</span>
@@ -107,7 +111,7 @@ export function AppSidebar() {
                       tooltip={item.label}
                       isActive={item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)}
                     >
-                      <Link to={item.to}>
+                      <Link to={item.to} onClick={close}>
                         <item.icon />
                         <span>{item.label}</span>
                       </Link>

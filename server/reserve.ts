@@ -26,7 +26,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS reserve (
   name TEXT PRIMARY KEY,
   until INTEGER NOT NULL,
   windows TEXT NOT NULL,
-  overridden INTEGER NOT NULL DEFAULT 0
+  overridden INTEGER NOT NULL DEFAULT 0,
+  pending INTEGER NOT NULL DEFAULT 0
 )`)
 
 interface Row {
@@ -36,17 +37,20 @@ interface Row {
   windows: ReserveWindow[]
   /** Enabled by hand while reserved: left alone until `until`. */
   overridden: boolean
+  /** Asked CPA to disable it but not yet seen disabled. */
+  pending: boolean
 }
 
 function rows() {
-  const all = db.prepare('SELECT name, until, windows, overridden FROM reserve').all() as { name: string; until: number; windows: string; overridden: number }[]
-  return new Map(all.map((r) => [r.name, { ...r, windows: JSON.parse(r.windows) as ReserveWindow[], overridden: !!r.overridden }]))
+  const all = db.prepare('SELECT name, until, windows, overridden, pending FROM reserve').all() as
+    { name: string; until: number; windows: string; overridden: number; pending: number }[]
+  return new Map<string, Row>(all.map((r) => [r.name, { ...r, windows: JSON.parse(r.windows) as ReserveWindow[], overridden: !!r.overridden, pending: !!r.pending }]))
 }
 
 const save = db.prepare(`
-  INSERT INTO reserve (name, until, windows, overridden) VALUES (?, ?, ?, ?)
-  ON CONFLICT (name) DO UPDATE SET until = excluded.until, windows = excluded.windows, overridden = excluded.overridden`)
-const saveRow = (r: Row) => save.run(r.name, r.until, JSON.stringify(r.windows), r.overridden ? 1 : 0)
+  INSERT INTO reserve (name, until, windows, overridden, pending) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT (name) DO UPDATE SET until = excluded.until, windows = excluded.windows, overridden = excluded.overridden, pending = excluded.pending`)
+const saveRow = (r: Row) => save.run(r.name, r.until, JSON.stringify(r.windows), r.overridden ? 1 : 0, r.pending ? 1 : 0)
 const removeRow = db.prepare('DELETE FROM reserve WHERE name = ?')
 
 export const reserveLimits = (): ReserveLimits => ({ ...DEFAULT_LIMITS, ...readState().reserve })
@@ -59,61 +63,86 @@ export function setReserveLimits(patch: Partial<ReserveLimits>) {
 export function reserveStatus() {
   return {
     limits: reserveLimits(),
-    accounts: Object.fromEntries([...rows().values()].map(({ name, ...r }) => [name, r])),
+    accounts: Object.fromEntries([...rows().values()].map((r) => [r.name, { until: r.until, windows: r.windows, overridden: r.overridden }])),
   }
 }
 
-/** The windows of an account at or below their reserve, and when the last of them resets. */
+/**
+ * The windows of an account at or below their reserve and when the last of them resets, plus every
+ * reserved window the reading covers at all.
+ */
 function shortfall(provider: string, reading: LimitReading | undefined, limits: ReserveLimits, now: number) {
   const windows: ReserveWindow[] = []
+  const seen = new Set<ReserveWindow>()
   let until = 0
   for (const w of limitWindows(provider, reading, now)) {
     const id = WINDOW_LABELS[w.label]
     // Without a reset time the account could never be enabled again.
     if (!id || !limits[id] || w.resetsAt === undefined) continue
+    seen.add(id)
     if (w.left > limits[id] / 100 + 1e-9) continue
     windows.push(id)
     until = Math.max(until, w.resetsAt)
   }
-  return windows.length ? { windows, until } : undefined
+  return { short: windows.length ? { windows, until } : undefined, seen }
 }
 
 async function setDisabled(name: string, disabled: boolean) {
   const res = await management('/credentials/status', { method: 'PATCH', body: { name, disabled } })
-  if (!res?.ok) throw new Error(`Could not ${disabled ? 'disable' : 'enable'} ${name}`)
+  if (!res?.ok) throw new Error(`could not ${disabled ? 'disable' : 'enable'} ${name}${res ? ` (HTTP ${res.status})` : ''}`)
   console.log(`Account reserve: ${disabled ? 'disabled' : 'enabled'} ${name}`)
 }
+
+/** Accounts whose last update failed, so a failure that repeats every tick is logged once. */
+const failing = new Set<string>()
 
 /** Brings each account's enabled state in line with the reserve. `files` is CPA's full credential list. */
 export async function applyReserve(files: ListedCredential[], readings: Record<string, LimitReading>, now = Date.now()) {
   const limits = reserveLimits()
   const tracked = rows()
   for (const f of files) {
-    let row = tracked.get(f.name)
+    const row = tracked.get(f.name)
     tracked.delete(f.name)
     if (!f.provider || !PROVIDERS.has(f.provider)) continue
-    if (row?.overridden) {
-      if (now < row.until) continue
-      removeRow.run(f.name)
-      row = undefined
-    }
-    const short = shortfall(f.provider, readings[f.name], limits, now)
-    if (short) {
-      if (row && !f.disabled) {
-        // Enabled by hand while reserved.
-        saveRow({ name: f.name, ...short, overridden: true })
-      } else if (row) {
-        if (row.until !== short.until || row.windows.join() !== short.windows.join()) saveRow({ name: f.name, ...short, overridden: false })
-      } else if (!f.disabled) {
-        await setDisabled(f.name, true)
-        saveRow({ name: f.name, ...short, overridden: false })
-      }
-      // Disabled by the user: theirs to enable.
-    } else if (row) {
-      if (f.disabled) await setDisabled(f.name, false)
-      removeRow.run(f.name)
+    try {
+      await applyOne(f, row, shortfall(f.provider, readings[f.name], limits, now), limits, now)
+      failing.delete(f.name)
+    } catch (err) {
+      // Retried next tick; other accounts still get their turn.
+      if (!failing.has(f.name)) console.error(`Account reserve: ${(err as Error).message}`)
+      failing.add(f.name)
     }
   }
-  // Deleted credentials.
-  for (const name of tracked.keys()) removeRow.run(name)
+  // Credentials no longer listed (deleted, or briefly missing): forget them once their windows reset.
+  for (const row of tracked.values()) if (now >= row.until) removeRow.run(row.name)
+}
+
+async function applyOne(f: ListedCredential, row: Row | undefined, { short, seen }: ReturnType<typeof shortfall>, limits: ReserveLimits, now: number) {
+  if (row?.overridden) {
+    if (now < row.until) return
+    removeRow.run(f.name)
+    row = undefined
+  }
+  if (short) {
+    if (row && !row.pending && !f.disabled) {
+      // Enabled by hand while reserved.
+      saveRow({ name: f.name, ...short, overridden: true, pending: false })
+    } else if (row?.pending || (!row && !f.disabled)) {
+      // Saved first, so a disable CPA applies but reports as failed is still ours.
+      saveRow({ name: f.name, ...short, overridden: false, pending: true })
+      if (!f.disabled) await setDisabled(f.name, true)
+      saveRow({ name: f.name, ...short, overridden: false, pending: false })
+    } else if (row && (row.until !== short.until || row.windows.join() !== short.windows.join())) {
+      saveRow({ ...row, ...short })
+    }
+    // Disabled by the user: theirs to enable.
+    return
+  }
+  if (!row) return
+  // A response can carry rate-limit headers without a window's utilization; that is no sign the
+  // window recovered. Hold the account until each window that tripped shows up above its reserve,
+  // its reserve is turned off, or it resets.
+  if (now < row.until && row.windows.some((id) => limits[id] && !seen.has(id))) return
+  if (f.disabled) await setDisabled(f.name, false)
+  removeRow.run(f.name)
 }

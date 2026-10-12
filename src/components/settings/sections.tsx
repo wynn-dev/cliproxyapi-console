@@ -8,8 +8,8 @@ import { Spinner } from '@/components/ui/spinner'
 import { queries, useConfigWrite, useReserveWrite } from '@/lib/queries'
 import { SUBSCRIPTION_ROUTING, hasAccountPool, keepsCachesWarm } from '@/lib/routing'
 import { NumberField, SectionCard, SelectField, SwitchField, TextField } from './form'
-import { getPath, useReportDirty, useSectionForm, type FieldSpec } from './form-state'
-import { MANAGED_SETTINGS, type ManagedSetting } from './managed'
+import { useReportDirty, useSectionForm, type FieldSpec } from './form-state'
+import { MANAGED_SETTINGS, type ManagedSetting, managedValue, showValue } from './managed'
 
 export type DirtyReporter = (id: string, dirty: boolean) => void
 
@@ -537,13 +537,19 @@ export function LoggingSection({ onDirty }: { onDirty: DirtyReporter }) {
 /** A setting the console relies on: shown, not editable, with a way back if it was changed by hand. */
 function ManagedRow({ setting: m, config }: { setting: ManagedSetting; config: unknown }) {
   const write = useConfigWrite()
-  const drifted = getPath(config, m.path) !== m.value
+  const current = managedValue(config, m)
+  const drifted = current !== m.value
   return (
     <div className="flex items-start justify-between gap-6">
       <div className="min-w-0 space-y-1">
         <div className="text-sm font-medium">{m.label}</div>
         <p className="text-sm text-muted-foreground">{m.reason}</p>
-        {drifted && <p className="text-xs text-warning">Changed in config.yaml. The console needs it set to {m.shown.toLowerCase()}.</p>}
+        {drifted && (
+          <p className="text-xs text-warning">
+            {current === undefined ? 'Missing from config.yaml' : `Set to ${showValue(current).toLowerCase()} in config.yaml`}. The console needs it to be{' '}
+            {showValue(m.value).toLowerCase()}.
+          </p>
+        )}
       </div>
       {drifted ? (
         <Button
@@ -559,7 +565,7 @@ function ManagedRow({ setting: m, config }: { setting: ManagedSetting; config: u
       ) : (
         <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-sm text-muted-foreground">
           <LockIcon className="size-3.5" />
-          {m.shown}
+          {showValue(m.value)}
         </span>
       )}
     </div>

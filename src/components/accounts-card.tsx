@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { ArrowRightIcon } from 'lucide-react'
 import { StatusDot } from '@/components/common'
 import { CredentialStatus } from '@/components/credentials/status'
-import { accountName, credState, reserveHold, reserveNote } from '@/components/credentials/lib'
+import { accountName, credState, holdLabel, reserveHold, reserveNote } from '@/components/credentials/lib'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -127,6 +127,10 @@ function AccountRow({
 }) {
   const windows = limitWindows(c.provider, reading, now)
   const hold = reserveHold(c, reserve)
+  // The caption goes on the limits that tripped the hold, or on all of them when none of them did.
+  const tripped = (w: LimitWindow) => !!hold && (hold.reason === 'extra-usage' ? hold.windows.includes(w.label) : hold.windows.includes(RESERVE_WINDOWS[w.label]!))
+  const held = hold && !hold.overridden ? { label: holdLabel(hold), until: hold.until } : undefined
+  const heldOn = windows.some(tripped) ? tripped : () => true
   const recent = c.recent_requests.at(-1)
   const inUse = credState(c) === 'active' && !!recent && recent.success + recent.failed > 0
   const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
@@ -168,7 +172,16 @@ function AccountRow({
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
           {windows.map((w) => {
             const id = RESERVE_WINDOWS[w.label]
-            return <LimitMeter key={w.id} window={w} now={now} observedAt={observedAt} reserve={id && reserve?.limits[id]} />
+            return (
+              <LimitMeter
+                key={w.id}
+                window={w}
+                now={now}
+                observedAt={observedAt}
+                reserve={id && reserve?.limits[id]}
+                held={held && heldOn(w) ? held : undefined}
+              />
+            )
           })}
         </div>
       ) : (
@@ -187,11 +200,31 @@ const METER_TONE = {
   exhausted: { track: 'bg-critical/20', fill: 'bg-critical' },
 }
 
-function LimitMeter({ window: w, now, observedAt, reserve }: { window: LimitWindow; now: number; observedAt?: number; reserve?: number }) {
+function LimitMeter({
+  window: w,
+  now,
+  observedAt,
+  reserve,
+  held,
+}: {
+  window: LimitWindow
+  now: number
+  observedAt?: number
+  /** Percent kept back for direct use, marked with a tick on the bar. */
+  reserve?: number
+  /** The console holds the account back because of this limit. */
+  held?: { label: string; until: number }
+}) {
   const pct = Math.round(w.left * 100)
   const tone = METER_TONE[w.level]
   const resets = w.resetsAt ? `resets in ${fmtUntil(w.resetsAt - now)}` : undefined
-  const caption = w.reset ? 'Reset since the last reading' : w.level === 'exhausted' ? ['Limit reached', resets].filter(Boolean).join(' · ') : resets
+  const caption = held
+    ? `${held.label} · back in ${fmtUntil(held.until - now)}`
+    : w.reset
+      ? 'Reset since the last reading'
+      : w.level === 'exhausted'
+        ? ['Limit reached', resets].filter(Boolean).join(' · ')
+        : resets
 
   return (
     <Tooltip>
@@ -203,10 +236,15 @@ function LimitMeter({ window: w, now, observedAt, reserve }: { window: LimitWind
               {pct}% <span className="font-normal text-muted-foreground">left</span>
             </span>
           </div>
-          <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
-            <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
+          <div className="relative">
+            <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
+              <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
+            </div>
+            {!!reserve && (
+              <div aria-hidden className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70 ring-1 ring-card" style={{ left: `${reserve}%` }} />
+            )}
           </div>
-          <div className="text-[11px] text-muted-foreground first-letter:uppercase">{caption ?? ' '}</div>
+          <div className={cn('text-[11px] first-letter:uppercase', held ? 'font-medium text-foreground' : 'text-muted-foreground')}>{caption ?? ' '}</div>
         </div>
       </TooltipTrigger>
       <TooltipContent>
@@ -215,7 +253,7 @@ function LimitMeter({ window: w, now, observedAt, reserve }: { window: LimitWind
         </div>
         <div>{Math.round(w.used * 100)}% used</div>
         {w.resetsAt && <div>Resets {fmtWhen(w.resetsAt)}</div>}
-        {!!reserve && <div>{reserve}% kept in reserve for direct use</div>}
+        {!!reserve && <div>{reserve}% kept in reserve for direct use (the tick)</div>}
         {w.reset && <div>This window has reset since the last reading.</div>}
         {observedAt && <div className="opacity-80">Reported {fmtAgo(observedAt)}</div>}
       </TooltipContent>

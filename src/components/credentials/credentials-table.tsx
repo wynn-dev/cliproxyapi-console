@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import {
   type Column,
   type ColumnDef,
@@ -47,7 +48,8 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtCompact, fmtPercent } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
-import type { Credential } from '@/lib/types'
+import { queries } from '@/lib/queries'
+import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CredentialSheet } from './credential-sheet'
 import {
@@ -57,6 +59,7 @@ import {
   cooldownUntil,
   credState,
   downloadCredential,
+  reserveHold,
   totalRequests,
   useDeleteCredentials,
   useRefreshCredentials,
@@ -66,7 +69,13 @@ import {
 import { ModelsDialog } from './models-dialog'
 import { CredentialStatus } from './status'
 
-type StatusFilter = 'all' | CredState
+type StatusFilter = 'all' | CredState | 'reserved'
+
+/** Accounts the console holds back are their own filter, not under Disabled. */
+function filterState(c: Credential, reserve: ReserveStatus | undefined): Exclude<StatusFilter, 'all'> {
+  const hold = reserveHold(c, reserve)
+  return hold && !hold.overridden ? 'reserved' : credState(c)
+}
 
 interface Handlers {
   open: (c: Credential, edit?: boolean) => void
@@ -260,6 +269,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'cooling', label: 'Cooling' },
   { value: 'error', label: 'Error' },
+  { value: 'reserved', label: 'Reserved' },
   { value: 'disabled', label: 'Disabled' },
 ]
 
@@ -276,6 +286,7 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
   const refresh = useRefreshCredentials()
   const reset = useResetCooldown()
   const del = useDeleteCredentials()
+  const reserve = useQuery(queries.reserve()).data
 
   const handlers = useRef<Handlers>(null!)
   handlers.current = {
@@ -309,19 +320,19 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
 
   const byProvider = useMemo(() => (provider === 'all' ? files : files.filter((f) => f.provider === provider)), [files, provider])
   const statusCounts = useMemo(() => {
-    const counts: Record<StatusFilter, number> = { all: byProvider.length, active: 0, cooling: 0, error: 0, disabled: 0 }
-    for (const f of byProvider) counts[credState(f)]++
+    const counts: Record<StatusFilter, number> = { all: byProvider.length, active: 0, cooling: 0, error: 0, reserved: 0, disabled: 0 }
+    for (const f of byProvider) counts[filterState(f, reserve)]++
     return counts
-  }, [byProvider])
+  }, [byProvider, reserve])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return byProvider.filter((f) => {
-      if (status !== 'all' && credState(f) !== status) return false
+      if (status !== 'all' && filterState(f, reserve) !== status) return false
       if (!q) return true
       return [f.email, f.label, f.name, f.provider, providerLabel(f.provider), f.note].some((s) => s?.toLowerCase().includes(q))
     })
-  }, [byProvider, search, status])
+  }, [byProvider, search, status, reserve])
 
   const table = useReactTable({
     data: filtered,
@@ -529,10 +540,11 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
   )
 }
 
-const DOT: Record<CredState, string> = {
+const DOT: Record<Exclude<StatusFilter, 'all'>, string> = {
   active: 'bg-success',
   cooling: 'bg-warning',
   error: 'bg-critical',
+  reserved: 'bg-muted-foreground/50',
   disabled: 'bg-muted-foreground/50',
 }
 

@@ -9,8 +9,17 @@ export interface CpaConfigSummary {
   tls: boolean
   secretKey: string
   clientKeys: string[]
-  /** routing.strategy, defaulting like CPA. */
-  strategy: string
+  /** routing.strategy, normalized like CPA. */
+  strategy: 'round-robin' | 'weighted-round-robin' | 'fill-first'
+  sessionAffinity: boolean
+}
+
+/** CPA's own reading of routing.strategy (sdk/cliproxy/service_config.go). */
+function strategyOf(raw: unknown): CpaConfigSummary['strategy'] {
+  const s = String(raw ?? '').trim().toLowerCase()
+  if (['weighted-round-robin', 'weightedroundrobin', 'wrr'].includes(s)) return 'weighted-round-robin'
+  if (['fill-first', 'fillfirst', 'ff'].includes(s)) return 'fill-first'
+  return 'round-robin'
 }
 
 let cache: { mtimeMs: number; summary: CpaConfigSummary } | undefined
@@ -36,7 +45,8 @@ export function readCpaConfig(): CpaConfigSummary | undefined {
       tls: doc.server?.tls?.enable === true,
       secretKey: String(doc.management?.['secret-key'] ?? ''),
       clientKeys: (doc.access?.['api-keys'] ?? []).filter((k: unknown) => typeof k === 'string'),
-      strategy: String(doc.routing?.strategy || 'round-robin'),
+      strategy: strategyOf(doc.routing?.strategy),
+      sessionAffinity: doc.routing?.['session-affinity'] === true,
     }
     cache = { mtimeMs: stat.mtimeMs, summary }
     return summary

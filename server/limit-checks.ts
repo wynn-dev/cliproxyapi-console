@@ -29,10 +29,17 @@ const backoff = (failures: number) => Math.min(MAX_BACKOFF_MS, STALE_MS * 2 ** f
 /**
  * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point one provider's
  * checks at a mock on this machine, reached directly rather than through the account's proxy. Not a
- * user option. Any other host disables that provider's checks, so a typo never reaches a real one.
+ * user option. So a test never reaches a real provider, setting either one turns off checks for a
+ * provider without its own, and any host but this machine turns off that provider's checks.
  */
+const TESTING = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL)
+
 function endpoint(provider: string, variable: string, real: string) {
   const override = process.env[variable]
+  if (!override && TESTING) {
+    console.error(`Limit check: ${variable} is not set while testing; ${provider} accounts won't be checked.`)
+    return undefined
+  }
   if (!override) return { url: real, direct: false }
   let host = ''
   try {
@@ -143,7 +150,8 @@ function unixSeconds(v: unknown) {
 const plausibleReset = (reset: number | undefined, now: number): reset is number =>
   !!reset && reset * 1000 > now - 3_600_000 && reset * 1000 <= now + 7 * 86_400_000 + 3_600_000
 
-const validPercent = (v: number | undefined): v is number => v !== undefined && v >= 0 && v <= 100
+/** A percent from 0 to 100, allowing for rounding just over 100; undefined when it isn't one. */
+const percent = (v: number | undefined) => (v !== undefined && v >= 0 && v <= 101 ? Math.min(v, 100) : undefined)
 
 /**
  * Claude's usage response as the `anthropic-ratelimit-unified-*` headers it stands for, or why it
@@ -156,9 +164,11 @@ export function claudeSignals(body: unknown, now: number): Record<string, string
   const b = obj(body) ?? {}
   const out: Record<string, string> = {}
   for (const [key, id, label] of [['five_hour', '5h', '5-hour'], ['seven_day', '7d', 'weekly']]) {
+    // No 5-hour window running: left out, as nothing has been used.
+    if (key === 'five_hour' && b[key] === null) continue
     const w = obj(b[key])
-    const used = num(w?.utilization)
-    if (!validPercent(used)) return `The answer had no valid ${label} usage`
+    const used = percent(num(w?.utilization))
+    if (used === undefined) return `The answer had no valid ${label} usage`
     const reset = unixSeconds(w?.resets_at)
     // A window that hasn't started has no reset yet. 0% used without a reset can't release a held
     // account: the reserve only trusts a window with a reset time.
@@ -180,9 +190,9 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
 export function codexSignals(body: unknown, now: number): Record<string, string> | string {
   const b = obj(body) ?? {}
   const window = (prefix: string, slot: string, w: Record<string, unknown> | undefined) => {
-    const used = num(w?.used_percent)
+    const used = percent(num(w?.used_percent))
     const label = slot === 'primary' ? '5-hour' : 'weekly'
-    if (!w || !validPercent(used)) return `no valid ${label} usage`
+    if (!w || used === undefined) return `no valid ${label} usage`
     const after = num(w.reset_after_seconds)
     const reset = unixSeconds(w.reset_at) ?? (after !== undefined && after >= 0 ? Math.floor(now / 1000 + after) : undefined)
     if (!plausibleReset(reset, now)) return `no valid ${label} reset time`
@@ -213,7 +223,6 @@ export function codexSignals(body: unknown, now: number): Record<string, string>
     for (const w of ws) Object.assign(out, w)
     if (name) out[`x-codex-${scope}-limit-name`] = name
   }
-  if (typeof b.plan_type === 'string') out['x-codex-plan-type'] = b.plan_type
   return out
 }
 
@@ -294,8 +303,8 @@ async function checkNext(now = Date.now()) {
   const readings = limitReadings()
   const checks = rows()
   const held = reserveStatus().accounts
-  // Forget credentials that were removed.
-  for (const name of checks.keys()) if (!files?.some((f) => f.name === name)) deleteRow.run(name)
+  // Forget credentials that were removed; an empty list is more likely CPA still loading.
+  if (files?.length) for (const name of checks.keys()) if (!files.some((f) => f.name === name)) deleteRow.run(name)
   let next: { f: Listed; readAt: number } | undefined
   for (const f of files ?? []) {
     // Subscription accounts only: an API key has no usage page. Of the disabled ones, only those the

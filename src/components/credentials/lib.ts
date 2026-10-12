@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { ApiError, download, mgmt } from '@/lib/api'
 import { fmtWhen } from '@/lib/format'
 import type { ReserveWindow } from '@/lib/limits'
+import { queries } from '@/lib/queries'
 import type { Cooldown, Credential, CredentialsList, ReserveHold, ReserveStatus } from '@/lib/types'
 
 export type CredState = 'active' | 'cooling' | 'error' | 'disabled'
@@ -49,9 +50,18 @@ export function reserveHold(c: Credential, reserve: ReserveStatus | undefined) {
 }
 
 const WINDOW_NAMES: Record<ReserveWindow, string> = { '5h': '5\u2011hour', weekly: 'weekly' }
+/** By limit label, as limitWindows gives them. */
+const LIMIT_NAMES: Record<string, string> = { '5h': '5\u2011hour', Weekly: 'weekly' }
+
+/** What the status shows for an account the console holds back. */
+export const holdLabel = (hold: ReserveHold) => (hold.reason === 'extra-usage' ? 'Paid extra usage' : 'Reserved')
 
 /** Why the reserve holds an account back, or leaves it on, and until when. */
 export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) {
+  if (hold.reason === 'extra-usage') {
+    const ran = hold.windows.length ? `its ${hold.windows.map((w) => LIMIT_NAMES[w] ?? w).join(' and ')} limit ran out` : 'a limit ran out'
+    return `Turned off because ${ran} and it started billing its owner for extra usage. It stays off until ${fmtWhen(hold.until)}, even if you enable it.`
+  }
   const share = hold.windows.map((w) => `${limits[w]}% of its ${WINDOW_NAMES[w]} limit`).join(' and ')
   return hold.overridden
     ? `Enabled by hand with ${share} or less left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
@@ -129,6 +139,12 @@ export function useSetDisabled() {
     onSuccess: (r, { names, disabled }, ctx) => {
       if (r.failed.length && ctx?.prev) qc.setQueryData(KEY, ctx.prev)
       if (names.length > 1 || r.failed.length) reportBatch(disabled ? ['Disabled', 'disable'] : ['Enabled', 'enable'], r)
+      const billing = disabled ? [] : r.ok.filter((n) => qc.getQueryData(queries.reserve().queryKey)?.accounts[n]?.reason === 'extra-usage')
+      if (billing.length) {
+        toast.warning(billing.length === 1 ? `${billing[0]} is using paid extra usage` : `${billing.length} accounts are using paid extra usage`, {
+          description: 'The console turns them off again until their limits reset. Turn off holding them under Settings → Routing to use them anyway.',
+        })
+      }
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   })

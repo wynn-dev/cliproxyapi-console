@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { fmtDuration } from '@/lib/format'
 import { queries } from '@/lib/queries'
 import type { Cooldown, Credential } from '@/lib/types'
-import { STATE_META, cooldownLabel, cooldownUntil, credState, reserveHold, reserveNote, useTicker } from './lib'
+import { STATE_META, cooldownLabel, cooldownUntil, credState, holdLabel, reserveHold, reserveNote, useTicker } from './lib'
 
 /** Live "4m 12s" countdown to a timestamp. */
 export function Countdown({ until, endLabel = 'retrying' }: { until: number; endLabel?: string }) {
@@ -43,7 +43,7 @@ export function CredentialStatus({ credential: c }: { credential: Credential }) 
     <span className="inline-flex items-center gap-2">
       <StatusDot tone={meta.tone} />
       <span>
-        {reserved ? 'Reserved' : state === 'cooling' && onlyModels ? `${cooldowns.length} model${cooldowns.length > 1 ? 's' : ''} cooling` : meta.label}
+        {reserved ? holdLabel(hold) : state === 'cooling' && onlyModels ? `${cooldowns.length} model${cooldowns.length > 1 ? 's' : ''} cooling` : meta.label}
       </span>
       {until && (
         <span className="text-xs text-muted-foreground">

@@ -4,15 +4,9 @@ import { cacheBreaks, summarizeBreaks } from './insights-cache.ts'
 import { accounts, byAccount, dryTime, leftAt } from './insights-history.ts'
 import type { DigestAccount, DigestPool, DigestReport } from './insights-types.ts'
 import { reserveLimits } from './reserve.ts'
-import { db } from './usage.ts'
+import { db, usageSummary } from './usage.ts'
 
-/**
- * Weekly digest: the facts behind a plain-language summary of the last 7 days. The SPA words them.
- *
- * Not here yet, from other work in progress: requests CPA turned away while the pool was dry
- * (item 11) and value at API prices per account (item 12). Both belong next to `requests` below
- * once usage.ts records them.
- */
+/** Weekly digest: the facts behind a plain-language summary of the last 7 days. The SPA words them. */
 
 const WEEK = 7 * 86_400_000
 const KINDS: ReserveWindow[] = ['5h', 'weekly']
@@ -29,20 +23,25 @@ export function digest(now = Date.now()): DigestReport {
   const free = (s: LimitSample, t: number, kind: ReserveWindow) => leftAt(s, t) > reserve[kind] / 100 + 1e-9
 
   const pools: DigestPool[] = []
+  const dry: [number, number][] = []
   for (const [provider, list] of members) {
     if (!list.length) continue
     const names = list.map((a) => a.name)
-    pools.push({ provider, accounts: list.length, ...dryTime(names, history, reserve, from, now) })
+    const { stretches, ...time } = dryTime(names, history, reserve, from, now)
+    dry.push(...stretches)
+    pools.push({ provider, accounts: list.length, ...time })
   }
 
-  const traffic = db
-    .prepare('SELECT auth_index AS authIndex, COUNT(*) AS requests, TOTAL(failed) AS failed, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? GROUP BY auth_index')
-    .all(from, now) as { authIndex: string; requests: number; failed: number; tokens: number }[]
-  const byName = new Map<string, (typeof traffic)[number]>()
-  for (const r of traffic) {
-    const name = credentialByIndex(r.authIndex)?.name
+  // The Usage page's numbers: client requests overall, attempts per account.
+  const usage = usageSummary({ from, to: now }, 0)
+  const byName = new Map<string, (typeof usage.byCredential)[number]>()
+  for (const r of usage.byCredential) {
+    const name = credentialByIndex(r.key)?.name
     if (name) byName.set(name, r)
   }
+  const away = db.prepare('SELECT ts, reason FROM turned_away WHERE ts >= ? AND ts < ?').all(from, now) as { ts: number; reason: string }[]
+  const byReason: Record<string, number> = {}
+  for (const a of away) byReason[a.reason] = (byReason[a.reason] ?? 0) + 1
 
   const rows: DigestAccount[] = []
   for (const [provider, list] of members) {
@@ -70,7 +69,8 @@ export function digest(now = Date.now()): DigestReport {
         reserveHits,
         requests: t?.requests ?? 0,
         failed: t?.failed ?? 0,
-        tokens: t?.tokens ?? 0,
+        tokens: t?.total ?? 0,
+        value: t?.value ?? 0,
       })
     }
   }
@@ -83,7 +83,9 @@ export function digest(now = Date.now()): DigestReport {
     pools,
     accounts: rows,
     cacheBreaks: { sessions, ...summarizeBreaks(breaks) },
-    requests: traffic.reduce((s, r) => s + r.requests, 0),
-    failed: traffic.reduce((s, r) => s + r.failed, 0),
+    requests: usage.totals.requests,
+    failed: usage.totals.failed,
+    turnedAway: { total: away.length, whileDry: away.filter((a) => dry.some(([s, e]) => a.ts >= s && a.ts < e)).length, byReason },
+    value: usage.totals.value,
   }
 }

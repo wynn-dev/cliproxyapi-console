@@ -89,9 +89,10 @@ const STEP = 5 * 60_000
 /**
  * Time in [from, to) the pool was dry: every account that had a reading by then at its reserve or
  * limit. An account only counts from its first sample, so history needs the sample before `from`.
+ * `stretches` are the dry spans themselves, [start, end) in ms.
  */
 export function dryTime(names: string[], history: ReturnType<typeof byAccount>, reserve: Record<ReserveWindow, number>, from: number, to: number) {
-  const out = { dryMs: 0, longestDryMs: 0, dryStretches: 0 }
+  const out = { dryMs: 0, longestDryMs: 0, dryStretches: 0, stretches: [] as [number, number][] }
   let stretch = 0
   for (let t = from; t < to; t += STEP) {
     let known = false
@@ -107,8 +108,12 @@ export function dryTime(names: string[], history: ReturnType<typeof byAccount>, 
     }
     const step = Math.min(STEP, to - t)
     if (known && !free) {
-      if (!stretch) out.dryStretches++
+      if (!stretch) {
+        out.dryStretches++
+        out.stretches.push([t, t])
+      }
       stretch += step
+      out.stretches.at(-1)![1] = t + step
       out.dryMs += step
       out.longestDryMs = Math.max(out.longestDryMs, stretch)
     } else stretch = 0

@@ -445,10 +445,24 @@ const METRICS = `
   TOTAL(value) AS value,
   TOTAL(unpricedTokens) AS unpricedTokens`
 
-interface Metrics {
+/** A row of METRICS; `key` in breakdowns. */
+export interface Metrics {
+  key?: string
   requests: number
   failed: number
-  [k: string]: unknown
+  recovered: number
+  attempts: number
+  failedAttempts: number
+  input: number
+  output: number
+  reasoning: number
+  cached: number
+  cacheWrite: number
+  total: number
+  avgLatency: number | null
+  avgTtft: number | null
+  value: number
+  unpricedTokens: number
 }
 
 const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_000, 86_400_000]
@@ -465,7 +479,7 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
         (r) => [r.key, r.n],
       ),
     )
-  const withTurnedAway = (m: Metrics, n = 0) => ({ ...m, requests: m.requests + n, failed: m.failed + n, turnedAway: n })
+  const withTurnedAway = <M extends { requests: number; failed: number }>(m: M, n = 0) => ({ ...m, requests: m.requests + n, failed: m.failed + n, turnedAway: n })
 
   // One row per client request, built once. Bare columns come from its first attempt (SQLite takes
   // them from the MIN(ts) row), so a request belongs to the model, provider and key it started with.
@@ -482,7 +496,7 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
   }
   try {
     const totals = {
-      ...withTurnedAway(db.prepare(`SELECT ${METRICS} FROM client_requests`).get() as Metrics, turnedAway("''").get('')),
+      ...withTurnedAway(db.prepare(`SELECT ${METRICS} FROM client_requests`).get() as unknown as Metrics, turnedAway("''").get('')),
       unpricedModels: (db.prepare('SELECT DISTINCT model FROM client_requests WHERE unpricedTokens > 0 ORDER BY 1').all() as { model: string }[]).map((r) => r.model),
     }
 
@@ -505,14 +519,14 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
     }
 
     const group = (col: string) => {
-      const metrics = db.prepare(`SELECT ${col} AS key, ${METRICS} FROM client_requests GROUP BY 1 ORDER BY requests DESC LIMIT 50`).all() as (Metrics & { key: string })[]
+      const metrics = db.prepare(`SELECT ${col} AS key, ${METRICS} FROM client_requests GROUP BY 1 ORDER BY requests DESC LIMIT 50`).all() as unknown as (Metrics & { key: string })[]
       const away = turnedAway(col)
       const out = metrics.map((m) => withTurnedAway(m, away.get(m.key)))
       for (const [key, n] of away) if (!metrics.some((m) => m.key === key)) out.push(withTurnedAway({ key: String(key), ...EMPTY }, n))
       return out.sort((a, b) => b.requests - a.requests)
     }
     // Attempts, so an account shows the attempts that failed on it. Turned-away requests never reached one.
-    const byCredential = db
+    const credentials = db
       .prepare(
         `SELECT auth_index AS key, COUNT(*) AS requests, TOTAL(failed) AS failed, 0 AS recovered, COUNT(*) AS attempts,
           TOTAL(failed) AS failedAttempts, TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output,
@@ -521,8 +535,8 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
           TOTAL(v) AS value, TOTAL(CASE WHEN v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens
          FROM ${valued(src, w)} GROUP BY 1 ORDER BY requests DESC LIMIT 50`,
       )
-      .all(...w.params)
-      .map((m) => withTurnedAway(m as Metrics))
+      .all(...w.params) as unknown as (Metrics & { key: string })[]
+    const byCredential = credentials.map((m) => withTurnedAway(m))
     return { bucketMs: bucket, totals, series, byModel: group('model'), byProvider: group('provider'), byCredential, byApiKey: group('api_key') }
   } finally {
     db.exec('DROP TABLE temp.client_requests')

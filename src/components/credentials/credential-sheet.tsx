@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BoxesIcon, DownloadIcon, RefreshCwIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
+import { BoxesIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CopyButton, RequestSparkline, StatusDot } from '@/components/common'
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { mgmt } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtDateTime, fmtNumber, fmtPercent } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
+import { queries } from '@/lib/queries'
 import type { Credential } from '@/lib/types'
 import {
   STATE_META,
@@ -26,6 +27,8 @@ import {
   cooldownUntil,
   credState,
   downloadCredential,
+  reserveHold,
+  reserveNote,
   useDeleteCredentials,
   useRefreshCredentials,
   useResetCooldown,
@@ -79,6 +82,8 @@ function SheetBody({
   const refresh = useRefreshCredentials()
   const reset = useResetCooldown()
   const del = useDeleteCredentials()
+  const reserve = useQuery(queries.reserve()).data
+  const hold = reserveHold(c, reserve)
   const state = credState(c)
   const meta = STATE_META[state]
   const cooling = state === 'cooling' || (c.cooldowns?.length ?? 0) > 0
@@ -107,7 +112,7 @@ function SheetBody({
           {c.id_token?.plan_type && <Badge variant="outline" className="capitalize">{c.id_token.plan_type}</Badge>}
           <Badge variant="outline" className="gap-1.5">
             <StatusDot tone={meta.tone} />
-            {meta.label}
+            {hold && !hold.overridden ? 'Reserved' : meta.label}
           </Badge>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -163,8 +168,23 @@ function SheetBody({
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto">
-        {(state === 'error' || cooling || c.status_message) && (
+        {(state === 'error' || cooling || c.status_message || hold) && (
           <Section title="Status">
+            {hold && reserve && (
+              <Alert>
+                <ShieldIcon />
+                <AlertTitle>
+                  {hold.overridden ? (
+                    'Reserve overridden'
+                  ) : (
+                    <>
+                      Reserved · back in <Countdown until={hold.until} endLabel="a moment" />
+                    </>
+                  )}
+                </AlertTitle>
+                <AlertDescription>{reserveNote(hold, reserve.limits)}</AlertDescription>
+              </Alert>
+            )}
             {c.status_message && (
               <Alert variant={state === 'error' ? 'destructive' : 'default'}>
                 <AlertTitle>{state === 'error' ? 'Error' : 'Status message'}</AlertTitle>

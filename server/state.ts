@@ -11,6 +11,8 @@ export interface ConsoleState {
   autostart: boolean
   /** PID of the CPA child, so a console that was killed hard can reap it on the next start. */
   cpaPid?: number
+  /** Account reserve: percent of each 5-hour and weekly limit kept back. 0 turns a window's reserve off. */
+  reserve?: { '5h'?: number; weekly?: number }
 }
 
 let cached: ConsoleState | undefined

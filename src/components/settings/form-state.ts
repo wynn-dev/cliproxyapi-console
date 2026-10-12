@@ -2,7 +2,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useConfigWrite } from '@/lib/queries'
-import type { V8Config } from '@/lib/types'
 
 /**
  * Field specs are keyed by dotted config path (e.g. `routing.retry.request-retry`).
@@ -51,13 +50,17 @@ function validate(spec: FieldSpec, v: Value): string | undefined {
 
 export type SectionForm = ReturnType<typeof useSectionForm>
 
-export function useSectionForm(specs: Specs, config: V8Config | undefined, title: string) {
+/** Saves a section's changed fields (cleared ones as '') somewhere other than CPA's config, and refreshes `source`. Toasts its own errors. */
+export type Persist = (changes: Record<string, Value>) => Promise<unknown>
+
+/** Edits fields of `source`, by default CPA's config. */
+export function useSectionForm(specs: Specs, source: object | undefined, title: string, persist?: Persist) {
   const qc = useQueryClient()
   const write = useConfigWrite()
   const [draft, setDraft] = useState<Record<string, Value>>({})
   const [saving, setSaving] = useState(false)
 
-  const original = (path: string) => inputValue(specs[path], getPath(config, path))
+  const original = (path: string) => inputValue(specs[path], getPath(source, path))
   const value = (path: string) => (path in draft ? draft[path] : original(path))
   const isDirty = (path: string) => path in draft && draft[path] !== original(path)
   const error = (path: string) => (isDirty(path) ? validate(specs[path], draft[path]) : undefined)
@@ -65,7 +68,7 @@ export function useSectionForm(specs: Specs, config: V8Config | undefined, title
   const dirty = dirtyPaths.length > 0
   const valid = dirtyPaths.every((p) => !error(p))
 
-  async function save() {
+  async function writeConfig() {
     // PATCH stores nulls, so only touched fields are sent; a cleared field is DELETEd to restore its default.
     const patches: Record<string, Record<string, unknown>> = {}
     const deletes: string[] = []
@@ -81,20 +84,25 @@ export function useSectionForm(specs: Specs, config: V8Config | undefined, title
       for (const part of parts.slice(1, -1)) node = (node[part] ??= {}) as Record<string, unknown>
       node[parts[parts.length - 1]] = spec.kind === 'number' ? Number(String(v).trim()) : typeof v === 'string' ? v.trim() : v
     }
+    for (const [top, value] of Object.entries(patches)) {
+      await write.mutateAsync({ path: `/${top}`, value, method: 'PATCH' })
+    }
+    for (const path of deletes) {
+      await write.mutateAsync({ path: `/${path.replaceAll('.', '/')}`, value: undefined, method: 'DELETE' })
+    }
+    await qc.refetchQueries({ queryKey: ['mgmt', 'config'], exact: true })
+  }
+
+  async function save() {
     setSaving(true)
     try {
-      for (const [top, value] of Object.entries(patches)) {
-        await write.mutateAsync({ path: `/${top}`, value, method: 'PATCH' })
-      }
-      for (const path of deletes) {
-        await write.mutateAsync({ path: `/${path.replaceAll('.', '/')}`, value: undefined, method: 'DELETE' })
-      }
-      await qc.refetchQueries({ queryKey: ['mgmt', 'config'], exact: true })
+      if (persist) await persist(Object.fromEntries(dirtyPaths.map((p) => [p, draft[p]])))
+      else await writeConfig()
       setDraft({})
-      toast.success(`${title} saved`, { description: 'CLIProxyAPI reloads the change in about a second.' })
+      toast.success(`${title} saved`, persist ? undefined : { description: 'CLIProxyAPI reloads the change in about a second.' })
       return true
     } catch {
-      return false // useConfigWrite already toasts the error
+      return false // the write already toasts the error
     } finally {
       setSaving(false)
     }
@@ -102,7 +110,7 @@ export function useSectionForm(specs: Specs, config: V8Config | undefined, title
 
   return {
     specs,
-    loaded: !!config,
+    loaded: !!source,
     value,
     original,
     isDirty,

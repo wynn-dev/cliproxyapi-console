@@ -52,6 +52,11 @@ export function fmtDateTime(date: string | number | Date) {
   })
 }
 
+/** A point in the coming week or so, e.g. when a limit resets: "Mon, Oct 19, 14:00". */
+export function fmtWhen(date: string | number | Date) {
+  return new Date(date).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 /** Shows the first and last few characters of a secret. */
 export function maskSecret(s: string, visible = 4) {
   if (!s) return ''

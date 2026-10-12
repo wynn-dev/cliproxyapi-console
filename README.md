@@ -8,7 +8,8 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 - **Usage analytics**: CPA only keeps per-request usage for a few minutes. The console drains it continuously into
   SQLite, so you get history by model, credential, client key and provider, with tokens, latency and failures.
 - **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how much of each is left
-  and when it resets.
+  and when it resets. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
+  so people who use the account directly keep some room.
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
 - **API providers & client keys**: structured editors instead of raw YAML.
 - **Settings**: documented forms for routing, retries, networking and logging, plus a YAML editor with diff review.

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import YAML from 'yaml'
 import { paths } from './env.ts'
+import { recordLimitReading } from './limit-history.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
 import { management } from './management.ts'
 import { reserveStatus } from './reserve.ts'
@@ -278,7 +279,9 @@ async function check(f: Listed, prev: Row | undefined, now: number) {
   const signals = provider === 'claude' ? claudeSignals(body, now) : codexSignals(body, now)
   if (typeof signals === 'string') return fail(f.name, prev, now, status, signals)
   // Nothing is carried over from the last reading: it would be stored as if seen now.
-  saveReading(f.name, now, canonical(signals))
+  const reading = canonical(signals)
+  saveReading(f.name, now, reading)
+  recordLimitReading(f.name, provider, { observed_at: new Date(now).toISOString(), signals: reading })
   saveRow.run(f.name, now, now, 0, 0, '')
   if (prev?.failures) console.log(`Limit check: ${f.name} works again`)
 }

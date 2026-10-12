@@ -128,10 +128,14 @@ function buildColumns(h: React.RefObject<Handlers>): ColumnDef<Credential>[] {
             {c.name}
             {c.note && <span className="font-sans"> · {c.note}</span>}
           </div>
+          {/* Narrow screens drop the Status column, so it rides along here. */}
+          <div className="pt-0.5 lg:hidden">
+            <CredentialStatus credential={c} />
+          </div>
         </div>
       ),
       sortingFn: 'text',
-      meta: { className: 'max-w-0 w-full min-w-64' },
+      meta: { className: 'max-w-0 w-full sm:min-w-64' },
     },
     {
       id: 'status',
@@ -139,14 +143,14 @@ function buildColumns(h: React.RefObject<Handlers>): ColumnDef<Credential>[] {
       header: ({ column }) => <SortHeader label="Status" column={column} />,
       sortDescFirst: false,
       cell: ({ row }) => <CredentialStatus credential={row.original} />,
-      meta: { className: 'w-48' },
+      meta: { className: 'hidden lg:table-cell w-48' },
     },
     {
       id: 'traffic',
       accessorFn: totalRequests,
       header: ({ column }) => <SortHeader label="Traffic" column={column} />,
       sortDescFirst: true,
-      meta: { className: 'w-56' },
+      meta: { className: 'hidden lg:table-cell w-56' },
       cell: ({ row: { original: c } }) => {
         const total = totalRequests(c)
         return (
@@ -179,6 +183,7 @@ function buildColumns(h: React.RefObject<Handlers>): ColumnDef<Credential>[] {
           <span className={cn(c.weight == null && 'text-muted-foreground')}>{c.weight ?? '—'}</span>
         </span>
       ),
+      meta: { className: 'hidden xl:table-cell' },
     },
     {
       id: 'refreshed',
@@ -188,6 +193,7 @@ function buildColumns(h: React.RefObject<Handlers>): ColumnDef<Credential>[] {
           {fmtAgo(c.last_refresh)}
         </span>
       ),
+      meta: { className: 'hidden xl:table-cell' },
     },
     {
       id: 'enabled',
@@ -373,6 +379,7 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
           value={status}
           onValueChange={(v) => v && setStatus(v as StatusFilter)}
           aria-label="Status"
+          className="max-w-full overflow-x-auto"
         >
           {STATUS_FILTERS.map((s) => (
             <ToggleGroupItem key={s.value} value={s.value} className="gap-1.5 px-2.5 data-[state=on]:font-medium">
@@ -424,19 +431,19 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
                     <Skeleton className="size-4" />
                   </TableCell>
                   <TableCell>
-                    <Skeleton className="mb-1.5 h-4 w-48" />
-                    <Skeleton className="h-3 w-64" />
+                    <Skeleton className="mb-1.5 h-4 w-48 max-w-full" />
+                    <Skeleton className="h-3 w-64 max-w-full" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Skeleton className="h-4 w-20" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <Skeleton className="h-6 w-44" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden xl:table-cell">
                     <Skeleton className="h-4 w-10" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden xl:table-cell">
                     <Skeleton className="h-4 w-16" />
                   </TableCell>
                   <TableCell colSpan={2}>

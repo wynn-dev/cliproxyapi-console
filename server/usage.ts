@@ -107,7 +107,7 @@ interface TokenBreakdown {
   unclassified_tokens?: number
 }
 
-interface QueueRecord {
+export interface QueueRecord {
   timestamp: string
   latency_ms?: number
   ttft_ms?: number
@@ -138,6 +138,8 @@ interface QueueRecord {
   service_tier?: string
   response_service_tier?: string
   response_model?: string
+  /** The upstream response headers of this attempt, canonical names. Only read, never stored. */
+  response_headers?: Record<string, string[]>
 }
 
 const count = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : NaN)
@@ -192,6 +194,12 @@ const insert = db.prepare(`
     session_id, parent_session_id, is_fork, is_compaction, response_model, response_service_tier)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 
+const listeners: ((records: QueueRecord[]) => void)[] = []
+/** Called with each batch of records once stored, e.g. to read the rate-limit headers they carry. */
+export function onUsageRecords(fn: (records: QueueRecord[]) => void) {
+  listeners.push(fn)
+}
+
 function store(records: QueueRecord[]) {
   db.exec('BEGIN')
   try {
@@ -236,6 +244,13 @@ function store(records: QueueRecord[]) {
   } catch (err) {
     db.exec('ROLLBACK')
     throw err
+  }
+  for (const fn of listeners) {
+    try {
+      fn(records)
+    } catch (err) {
+      console.error(`Usage listener failed: ${err instanceof Error ? err.message : err}`)
+    }
   }
 }
 

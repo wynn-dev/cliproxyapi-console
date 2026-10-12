@@ -9,6 +9,7 @@ import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
 import { PACKAGE, defaults, env, paths } from './env.ts'
+import { limitHistory } from './limit-history.ts'
 import { limitReadings } from './limits.ts'
 import { type ReserveLimits, reserveStatus, setReserveLimits } from './reserve.ts'
 import { readState, updateState } from './state.ts'
@@ -147,6 +148,10 @@ app.post('/console/api/process/:action', async (c) => {
 })
 
 app.get('/console/api/limits', (c) => c.json(limitReadings()))
+app.get('/console/api/limits/history', (c) => {
+  const q = c.req.query()
+  return c.json(limitHistory(Number(q.from ?? Date.now() - 7 * 86_400_000), Number(q.to ?? Date.now()), q.name || undefined))
+})
 
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
 

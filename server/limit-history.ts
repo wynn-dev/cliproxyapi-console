@@ -133,8 +133,22 @@ let listed: ListedAccount[] = []
 /** CPA's credential list as of the last poll, for insights that need the pool as it is now. */
 export const listedCredentials = (): readonly ListedAccount[] => listed
 
-/** The credential file name and provider behind a usage record's auth_index, while CPA lists it. */
-export const credentialByIndex = (authIndex: string) => credentials.get(authIndex)
+/**
+ * Every auth_index seen and its file name, kept so usage records of a removed account still name
+ * it. Written only when the poll finds one new or renamed.
+ */
+db.exec('CREATE TABLE IF NOT EXISTS credential_names (auth_index TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL)')
+const saveName = db.prepare(`
+  INSERT INTO credential_names (auth_index, name, provider) VALUES (?, ?, ?)
+  ON CONFLICT (auth_index) DO UPDATE SET name = excluded.name, provider = excluded.provider`)
+const knownNames = new Map(
+  (db.prepare('SELECT auth_index AS authIndex, name, provider FROM credential_names').all() as { authIndex: string; name: string; provider: string }[]).map(
+    (r) => [r.authIndex, { name: r.name, provider: r.provider }],
+  ),
+)
+
+/** The credential file name and provider behind a usage record's auth_index, also once CPA no longer lists it. */
+export const credentialByIndex = (authIndex: string) => credentials.get(authIndex) ?? knownNames.get(authIndex)
 
 /** Fed from the limits recorder's poll of CPA's credential list. */
 export function recordCredentialLimits(files: (ListedAccount & { quota?: Partial<LimitReading> })[]) {
@@ -142,7 +156,15 @@ export function recordCredentialLimits(files: (ListedAccount & { quota?: Partial
   listed = files.map(({ name, auth_index, provider, disabled, priority }) => ({ name, auth_index, provider, disabled, priority }))
   try {
     for (const f of files) {
-      if (f.auth_index) credentials.set(f.auth_index, { name: f.name, provider: f.provider ?? '' })
+      if (f.auth_index) {
+        const cred = { name: f.name, provider: f.provider ?? '' }
+        credentials.set(f.auth_index, cred)
+        const known = knownNames.get(f.auth_index)
+        if (known?.name !== cred.name || known.provider !== cred.provider) {
+          saveName.run(f.auth_index, cred.name, cred.provider)
+          knownNames.set(f.auth_index, cred)
+        }
+      }
       if (f.quota?.signals) recordLimitReading(f.name, f.provider ?? '', { observed_at: f.quota.observed_at, signals: f.quota.signals })
     }
     flushLimitHistory()

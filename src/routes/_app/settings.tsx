@@ -2,6 +2,7 @@ import { createFileRoute, useBlocker } from '@tanstack/react-router'
 import { FileCodeIcon, NetworkIcon, RefreshCwIcon, ScrollTextIcon, ServerIcon, SplitIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { PageHeader } from '@/components/common'
+import { LimitChecksSection } from '@/components/settings/limit-checks-section'
 import { LoggingSection, NetworkSection, ReserveSection, RetriesSection, RoutingSection } from '@/components/settings/sections'
 import { OrderSection } from '@/components/settings/order-section'
 import { ManagementSection, ServerSection } from '@/components/settings/server-section'
@@ -96,6 +97,7 @@ function SettingsPage() {
               <RoutingSection onDirty={onDirty} />
               <ReserveSection onDirty={onDirty} />
               <OrderSection onDirty={onDirty} />
+              <LimitChecksSection onDirty={onDirty} />
             </>,
           )}
           {panel('retries', <RetriesSection onDirty={onDirty} />)}

@@ -12,6 +12,7 @@ import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts
 import { PACKAGE, defaults, env, paths } from './env.ts'
 import { insights } from './insights.ts'
 import { limitHistory } from './limit-history.ts'
+import { limitCheckStatus, setLimitChecks } from './limit-checks.ts'
 import { limitReadings } from './limits.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
 import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReserveLimits } from './reserve.ts'
@@ -211,6 +212,15 @@ app.get('/console/api/limits/history', (c) => {
 app.route('/console/api/insights', insights)
 
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
+
+app.get('/console/api/limit-checks', (c) => c.json(limitCheckStatus()))
+
+app.put('/console/api/limit-checks', async (c) => {
+  const body: { enabled?: unknown } = await c.req.json().catch(() => ({}))
+  if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled must be true or false' }, 400)
+  setLimitChecks(body.enabled)
+  return c.json(limitCheckStatus())
+})
 
 app.put('/console/api/reserve', async (c) => {
   const body: Partial<Record<keyof ReserveLimits | 'extraUsage', unknown>> = await c.req.json().catch(() => ({}))

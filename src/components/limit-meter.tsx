@@ -2,7 +2,7 @@ import { Countdown } from '@/components/credentials/status'
 import { holdLabel, reserveHold } from '@/components/credentials/lib'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtWhen } from '@/lib/format'
-import { RESERVE_WINDOWS, limitWindows, type LimitWindow } from '@/lib/limits'
+import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow } from '@/lib/limits'
 import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -14,30 +14,45 @@ function fmtUntil(ms: number) {
   return h ? `${h}h ${m % 60}m` : `${m}m`
 }
 
+/** Limits every model shares. A limit check only reports these, so the others come from an older reading. */
+const SHARED_WINDOWS = new Set(['5h', '7d', ':primary', ':secondary'])
+
 /** An account's limit meters, captioned with the reserve hold when there is one. */
 export function AccountMeters({
   account: c,
   reading,
+  older,
+  checkedAt,
   reserve,
   now,
   detailed,
   className,
 }: {
   account: Credential
-  reading?: Credential['quota']
+  reading?: LimitReading
+  /** An older reading, for model-scoped limits (Fable) the newer one lacks. */
+  older?: LimitReading
+  /** When a limit check last read this account, to tell its readings from live ones. */
+  checkedAt?: number
   reserve?: ReserveStatus
   now: number
   /** Spell out what the tooltip says, for places a tap must reach it (the account panel). */
   detailed?: boolean
   className?: string
 }) {
-  const windows = limitWindows(c.provider, reading, now)
+  const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
+  const olderAt = older?.observed_at ? Date.parse(older.observed_at) : undefined
+  // A check stores its reading with its own time, so equal times mean the reading came from it.
+  const checked = !!observedAt && observedAt === checkedAt
+  const fresh = limitWindows(c.provider, reading, now)
+  const kept = limitWindows(c.provider, older, now).filter((w) => !SHARED_WINDOWS.has(w.id) && !fresh.some((f) => f.id === w.id))
+  const meters = [...fresh.map((w) => ({ w, at: observedAt, checked, kept: false })), ...kept.map((w) => ({ w, at: olderAt, checked: false, kept: true }))]
+  const windows = meters.map((m) => m.w)
   const hold = reserveHold(c, reserve)
   // The caption goes on the limits that tripped the hold, or on all of them when none of them did.
   const tripped = (w: LimitWindow) => !!hold && (hold.reason === 'extra-usage' ? hold.windows.includes(w.label) : hold.windows.includes(RESERVE_WINDOWS[w.label]!))
   const held = hold && !hold.overridden ? { label: holdLabel(hold), until: hold.until } : undefined
   const heldOn = windows.some(tripped) ? tripped : () => true
-  const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
 
   if (!windows.length) {
     return (
@@ -48,14 +63,16 @@ export function AccountMeters({
   }
   return (
     <div className={cn('grid grid-cols-2 gap-x-6 gap-y-3', className)}>
-      {windows.map((w) => {
+      {meters.map(({ w, at, checked, kept }) => {
         const id = RESERVE_WINDOWS[w.label]
         return (
           <LimitMeter
             key={w.id}
             window={w}
             now={now}
-            observedAt={observedAt}
+            observedAt={at}
+            checked={checked}
+            older={kept}
             reserve={id && reserve?.limits[id]}
             held={held && heldOn(w) ? held : undefined}
             detailed={detailed}
@@ -77,6 +94,8 @@ function LimitMeter({
   window: w,
   now,
   observedAt,
+  checked,
+  older,
   reserve,
   held,
   detailed,
@@ -84,6 +103,10 @@ function LimitMeter({
   window: LimitWindow
   now: number
   observedAt?: number
+  /** The reading came from a limit check rather than live traffic. */
+  checked?: boolean
+  /** From an older reading than the account's other meters. */
+  older?: boolean
   /** Percent kept back for direct use, marked with a tick on the bar. */
   reserve?: number
   /** The console holds the account back because of this limit. */
@@ -129,6 +152,7 @@ function LimitMeter({
             <div className="space-y-0.5 text-[11px] text-muted-foreground">
               {w.resetsAt && <div>Resets {fmtWhen(w.resetsAt)}</div>}
               {!!reserve && <div>{reserve}% kept in reserve (the tick)</div>}
+              {older && observedAt && <div>Reported {fmtAgo(observedAt)}</div>}
             </div>
           )}
         </div>
@@ -141,7 +165,11 @@ function LimitMeter({
         {w.resetsAt && <div>Resets {fmtWhen(w.resetsAt)}</div>}
         {!!reserve && <div>{reserve}% kept in reserve for direct use (the tick)</div>}
         {w.reset && <div>This window has reset since the last reading.</div>}
-        {observedAt && <div className="opacity-80">Reported {fmtAgo(observedAt)}</div>}
+        {observedAt && (
+          <div className="opacity-80">
+            {checked ? 'Checked' : 'Reported'} {fmtAgo(observedAt)}
+          </div>
+        )}
       </TooltipContent>
     </Tooltip>
   )

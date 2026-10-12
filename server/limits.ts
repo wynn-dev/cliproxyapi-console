@@ -24,6 +24,11 @@ const upsert = db.prepare(`
   ON CONFLICT (name) DO UPDATE SET observed_at = excluded.observed_at, signals = excluded.signals
   WHERE excluded.observed_at > limits.observed_at`)
 
+/** Stores a reading unless a newer one is already stored. Also used by the idle-account limit checks. */
+export function saveReading(name: string, observedAt: number, signals: Record<string, string>) {
+  upsert.run(name, observedAt, JSON.stringify(signals))
+}
+
 async function record() {
   const res = await management('/credentials')
   if (!res?.ok) return
@@ -31,7 +36,7 @@ async function record() {
   for (const f of files ?? []) {
     const at = Date.parse(f.quota?.observed_at ?? '')
     const signals = f.quota?.signals ?? {}
-    if (at && Object.keys(signals).length) upsert.run(f.name, at, JSON.stringify(signals))
+    if (at && Object.keys(signals).length) saveReading(f.name, at, signals)
   }
   recordCredentialLimits(files ?? [])
   return files ?? []

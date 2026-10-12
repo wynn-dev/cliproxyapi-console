@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 import { toast } from 'sonner'
 import { consoleApi, mgmt } from './api'
 import type { LimitReading } from './limits'
-import type { ApiKeyGroup, ConsoleStatus, CredentialsList, OrderStatus, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
+import type { ApiKeyGroup, ConsoleStatus, CredentialsList, LimitChecks, OrderStatus, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
 
 export const queries = {
   status: () =>
@@ -55,6 +55,13 @@ export const queries = {
       queryFn: () => consoleApi<OrderStatus>('/order'),
       refetchInterval: 10_000,
     }),
+  /** Limit checks for idle accounts: whether they are on, and each account's last check. */
+  limitChecks: () =>
+    queryOptions({
+      queryKey: ['console', 'limit-checks'],
+      queryFn: () => consoleApi<LimitChecks>('/limit-checks'),
+      refetchInterval: 30_000,
+    }),
   providerGroups: (provider: string) =>
     queryOptions({
       queryKey: ['mgmt', 'config', 'api-keys', provider],
@@ -95,6 +102,17 @@ export function useOrderWrite() {
     mutationFn: (enabled: boolean) => consoleApi<OrderStatus>('/order', { method: 'PUT', body: { enabled } }),
     onMutate: () => qc.cancelQueries({ queryKey: queries.order().queryKey }),
     onSuccess: (status) => qc.setQueryData(queries.order().queryKey, status),
+    onError: (err) => toast.error('Could not save', { description: err.message }),
+  })
+}
+
+/** Turns limit checks for idle accounts on or off. */
+export function useLimitChecksWrite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => consoleApi<LimitChecks>('/limit-checks', { method: 'PUT', body: { enabled } }),
+    onMutate: () => qc.cancelQueries({ queryKey: queries.limitChecks().queryKey }),
+    onSuccess: (status) => qc.setQueryData(queries.limitChecks().queryKey, status),
     onError: (err) => toast.error('Could not save', { description: err.message }),
   })
 }

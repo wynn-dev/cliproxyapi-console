@@ -4,7 +4,7 @@ import { ArrowRightIcon, ChevronRightIcon } from 'lucide-react'
 import { useState } from 'react'
 import { StatusDot } from '@/components/common'
 import { CredentialSheet } from '@/components/credentials/credential-sheet'
-import { accountName, credState, reserveHold, reserveNote } from '@/components/credentials/lib'
+import { accountName, credState, reserveHold, reserveNote, useAccountParam } from '@/components/credentials/lib'
 import { ModelsDialog } from '@/components/credentials/models-dialog'
 import { CredentialStatus } from '@/components/credentials/status'
 import { AccountMeters } from '@/components/limit-meter'
@@ -29,7 +29,7 @@ function byRoutingOrder(a: Credential, b: Credential) {
 }
 
 /** Every account with its usage limits, as the provider last reported them. */
-export function AccountsCard({ running }: { running: boolean }) {
+export function AccountsCard({ running, account }: { running: boolean; account?: string }) {
   const now = useNow(30_000)
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const stored = useQuery({ ...queries.limits(), enabled: running })
@@ -38,7 +38,7 @@ export function AccountsCard({ running }: { running: boolean }) {
   const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
   const routing = routingOf(config.data)
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
-  const [open, setOpen] = useState<string | null>(null)
+  const setOpen = useAccountParam(account, credentials.data?.files)
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
 
   return (
@@ -104,9 +104,9 @@ export function AccountsCard({ running }: { running: boolean }) {
         )}
       </CardContent>
       <CredentialSheet
-        credential={accounts.find((c) => c.name === open) ?? null}
+        credential={accounts.find((c) => c.name === account) ?? null}
         focusEdit={false}
-        onOpenChange={(o) => !o && setOpen(null)}
+        onOpenChange={(o) => !o && setOpen()}
         onShowModels={setModelsFor}
       />
       <ModelsDialog credential={modelsFor} onOpenChange={(o) => !o && setModelsFor(null)} />
@@ -145,6 +145,7 @@ function AccountRow({
         <div className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
+            aria-haspopup="dialog"
             className="truncate rounded-sm text-left text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             onClick={(e) => {
               e.stopPropagation()

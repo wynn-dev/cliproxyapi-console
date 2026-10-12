@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useNavigate, useRouter } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, download, mgmt } from '@/lib/api'
 import { fmtDuration, fmtWhen } from '@/lib/format'
@@ -17,6 +18,37 @@ export const STATE_META: Record<CredState, { label: string; tone: 'good' | 'warn
 }
 
 export const accountName = (c: Credential) => c.email || c.label || c.name
+
+export const validateAccountSearch = (s: Record<string, unknown>): { account?: string } => ({
+  account: typeof s.account === 'string' && s.account ? s.account : undefined,
+})
+
+/**
+ * Keeps the open account panel in the page's `?account=` search param. Opening pushes a history
+ * entry, so Back closes the panel on phones; a name that no longer exists is dropped once the list
+ * has loaded. Returns the setter (undefined closes).
+ */
+export function useAccountParam(account: string | undefined, files: Credential[] | undefined) {
+  const navigate = useNavigate()
+  const router = useRouter()
+  const pushed = useRef(false)
+  const set = (name: string | undefined, replace: boolean) =>
+    void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, account: name }), replace })
+  const stale = !!account && !!files && !files.some((f) => f.name === account)
+  useEffect(() => {
+    if (!account) pushed.current = false
+    if (stale) void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, account: undefined }), replace: true })
+  }, [account, stale, navigate])
+  return (name?: string) => {
+    if (name) {
+      pushed.current = true
+      set(name, false)
+    } else if (pushed.current) {
+      pushed.current = false
+      router.history.back()
+    } else set(undefined, true)
+  }
+}
 
 const validTime = (s?: string) => {
   if (!s) return null

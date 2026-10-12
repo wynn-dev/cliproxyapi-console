@@ -34,7 +34,8 @@ export function RequestSheet({ request: r, labels, onClose }: { request: UsageRe
 function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
   const navigate = useNavigate()
   // API keys from config have an auth_index too, but no account panel.
-  const account = useQuery({ ...queries.credentials(), refetchInterval: false }).data?.files.find((c) => c.auth_index === r.authIndex)
+  const files = useQuery({ ...queries.credentials(), refetchInterval: false }).data?.files
+  const account = r.authIndex ? files?.find((c) => c.auth_index === r.authIndex) : undefined
   const [downloading, setDownloading] = useState(false)
 
   const downloadLog = async () => {

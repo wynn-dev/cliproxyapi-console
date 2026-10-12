@@ -9,7 +9,8 @@ import { db, onUsageRecords } from './usage.ts'
  *
  * A window gets a row when its reading changes, at most once per five minutes, so a busy account
  * adds about 300 rows a day per window. Only a change of level (warning, exhausted) or a reset is
- * written right away. Rows are kept as long as usage records.
+ * written right away. A change held back waits in memory: it is written once the gap has passed or
+ * when the console shuts down, so only a crash loses it. Rows are kept as long as usage records.
  *
  * `window_id` is limitWindows' id (`5h`, `7d`, `7d_oi` for Claude, `:primary`, `<scope>:secondary`
  * for Codex), or `account` for account-wide signals (extra usage, credits) kept as JSON in `status`.
@@ -99,11 +100,11 @@ export function recordLimitReading(name: string, provider: string, reading: Limi
   }
 }
 
-/** Writes changes held back by the five-minute gap once it has passed. */
-function flush() {
+/** Writes changes held back by the five-minute gap once it has passed, or all of them (on shutdown). */
+export function flushLimitHistory(all = false) {
   const now = Date.now()
   for (const [key, t] of tracks) {
-    if (t.pending && now - t.writtenAt >= MIN_GAP_MS) {
+    if (t.pending && (all || now - t.writtenAt >= MIN_GAP_MS)) {
       const [name, id] = key.split('\n')
       write(name, id, t, t.pending)
     }
@@ -128,7 +129,7 @@ export function recordCredentialLimits(files: { name: string; auth_index?: strin
       if (f.auth_index) credentials.set(f.auth_index, { name: f.name, provider: f.provider ?? '' })
       if (f.quota?.signals) recordLimitReading(f.name, f.provider ?? '', { observed_at: f.quota.observed_at, signals: f.quota.signals })
     }
-    flush()
+    flushLimitHistory()
     prune()
   } catch (err) {
     // Never in the way of the reserve, which runs after this on the same poll.

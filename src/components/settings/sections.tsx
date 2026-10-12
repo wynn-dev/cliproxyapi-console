@@ -52,6 +52,7 @@ const routingSpecs: Record<string, FieldSpec> = {
     validate: (v) => (/^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$/.test(v) ? undefined : 'Use a duration like 30m, 1h or 1h30m'),
   },
   'routing.session-affinity-subagents': { kind: 'switch', default: true },
+  'routing.session-affinity-rebind-on': { kind: 'switch', default: false, values: ['quota', 'any'] },
   'routing.force-model-prefix': { kind: 'switch', default: false },
 }
 
@@ -82,6 +83,7 @@ export function RoutingSection({ onDirty }: { onDirty: DirtyReporter }) {
               onClick={() => {
                 form.set('routing.strategy', SUBSCRIPTION_ROUTING.strategy)
                 form.set('routing.session-affinity', SUBSCRIPTION_ROUTING.affinity)
+                form.set('routing.session-affinity-rebind-on', true)
               }}
             >
               Use these
@@ -143,6 +145,20 @@ export function RoutingSection({ onDirty }: { onDirty: DirtyReporter }) {
       />
       <SwitchField
         form={form}
+        path="routing.session-affinity-rebind-on"
+        label="Keep sessions through server errors"
+        disabled={!affinity}
+        description={
+          <>
+            When a request fails with a server error or overload (5xx, 529), only that request moves to another credential; the session
+            stays bound to its own and keeps its prompt cache. Limits and sign-in errors still move it. Off, any failure moves the session for
+            good.{affinityOff}
+            <Default>off</Default>
+          </>
+        }
+      />
+      <SwitchField
+        form={form}
         path="routing.force-model-prefix"
         label="Force model prefix"
         description={
@@ -163,6 +179,7 @@ const RESERVE_DEFAULT = 5
 const reserveSpecs: Record<string, FieldSpec> = {
   'limits.5h': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
   'limits.weekly': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
+  extraUsage: { kind: 'switch', default: true },
 }
 
 /** Kept by the console rather than in CPA's config. */
@@ -171,11 +188,17 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
   const write = useReserveWrite()
   const form = useSectionForm(reserveSpecs, data, 'Account reserve', (changes) =>
     write.mutateAsync(
-      Object.fromEntries(Object.entries(changes).map(([path, v]) => [path.split('.')[1], v === '' ? RESERVE_DEFAULT : Number(String(v).trim())])),
+      Object.fromEntries(
+        Object.entries(changes).map(([path, v]) => [
+          path.split('.').at(-1),
+          typeof v === 'boolean' ? v : v === '' ? RESERVE_DEFAULT : Number(String(v).trim()),
+        ]),
+      ),
     ),
   )
   useReportDirty('routing.reserve', form.dirty, onDirty)
   const held = Object.values(data?.accounts ?? {}).filter((a) => !a.overridden).length
+  const billing = Object.values(data?.accounts ?? {}).filter((a) => a.reason === 'extra-usage').length
 
   return (
     <SectionCard
@@ -215,6 +238,19 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
           <>
             The same for the weekly limit: the account stays off until its week resets. 0 turns this off.
             <Default>5%</Default>
+          </>
+        }
+      />
+      <SwitchField
+        form={form}
+        path="extraUsage"
+        label="Hold accounts that start using paid extra usage"
+        description={
+          <>
+            Once a Claude account runs out of a limit with extra usage turned on, Anthropic keeps serving it and bills its owner. The console
+            disables it until that limit resets, and turns it off again if you enable it.
+            {billing > 0 && ` Holding ${billing} account${billing === 1 ? '' : 's'} for this right now.`}
+            <Default>on</Default>
           </>
         }
       />

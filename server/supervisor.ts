@@ -1,6 +1,6 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import readline from 'node:readline'
-import { binaryPath, installedVersion } from './binary.ts'
+import { binaryPath, installProgress, installedVersion } from './binary.ts'
 import { readCpaConfig } from './cpa-config.ts'
 import { paths } from './env.ts'
 import { readState, updateState } from './state.ts'
@@ -16,6 +16,10 @@ export interface OutputLine {
 
 const MAX_LINES = 2000
 const STOP_TIMEOUT_MS = 10_000
+/** Liveness checks while running: a hung CPA is restarted after about a minute of silence. */
+const CHECK_INTERVAL_MS = 15_000
+const CHECK_TIMEOUT_MS = 5_000
+const MAX_FAILED_CHECKS = 4
 
 /** Runs CPA as a child process, restarts it on crashes and keeps a ring buffer of its output. */
 class Supervisor {
@@ -27,6 +31,10 @@ class Supervisor {
   restarts = 0
   lastExit: { code: number | null; signal: string | null; at: number } | undefined
   lastError: string | undefined
+  /** Last liveness check while running. */
+  lastCheck: { ok: boolean; at: number } | undefined
+  /** When CPA was last restarted because it stopped answering while its process was still alive. */
+  lastHangAt: number | undefined
 
   private child: ChildProcess | undefined
   private lines: OutputLine[] = []
@@ -34,6 +42,8 @@ class Supervisor {
   private backoffMs = 1000
   private restartTimer: NodeJS.Timeout | undefined
   private exited: Promise<void> | undefined
+  private failedChecks = 0
+  private hung = false
 
   output(after = 0) {
     return { seq: this.seq, lines: this.lines.filter((l) => l.seq > after) }
@@ -53,6 +63,9 @@ class Supervisor {
     }
     this.state = 'starting'
     this.lastError = undefined
+    this.lastCheck = undefined
+    this.failedChecks = 0
+    this.hung = false
     this.port = readCpaConfig()?.port
     this.log('console', `Starting CLIProxyAPI ${installedVersion()}`)
 
@@ -85,8 +98,8 @@ class Supervisor {
         } else {
           this.state = 'crashed'
           this.lastError ??= `Exited unexpectedly with ${signal ?? `code ${code}`}`
-          // Reset backoff after a healthy run; otherwise back off up to 30s.
-          if (this.startedAt && Date.now() - this.startedAt > 60_000) this.backoffMs = 1000
+          // Reset backoff after a healthy run; otherwise back off up to 30s. A hang is never healthy.
+          if (!this.hung && this.startedAt && Date.now() - this.startedAt > 60_000) this.backoffMs = 1000
           this.log('console', `Restarting in ${this.backoffMs / 1000}s`)
           this.restartTimer = setTimeout(() => {
             this.restarts++
@@ -132,17 +145,55 @@ class Supervisor {
     const deadline = Date.now() + 30_000
     while (this.child === child && Date.now() < deadline) {
       if (await this.ping()) {
-        if (this.child === child && this.state === 'starting') this.state = 'running'
+        if (this.child === child && this.state === 'starting') {
+          this.state = 'running'
+          this.lastCheck = { ok: true, at: Date.now() }
+          void this.watch(child)
+        }
         return
       }
       await new Promise((r) => setTimeout(r, 300))
     }
   }
 
-  private async ping() {
+  /**
+   * Restarts CPA when its process is alive but has stopped answering HTTP, which exit-based
+   * restarts never catch. Checks pause outside `running` and while a CPA update is installing.
+   */
+  private async watch(child: ChildProcess) {
+    let next = Date.now()
+    while (this.child === child) {
+      // Fixed cadence, so slow checks don't stretch the time to a restart (but no catch-up burst after a sleep).
+      next = Math.max(next + CHECK_INTERVAL_MS, Date.now())
+      await new Promise((r) => setTimeout(r, Math.max(0, next - Date.now())).unref())
+      const install = installProgress()?.phase
+      if (this.child !== child || this.state !== 'running' || (install && install !== 'done' && install !== 'error')) continue
+      const ok = await this.ping(CHECK_TIMEOUT_MS)
+      if (this.child !== child || this.state !== 'running') continue
+      this.lastCheck = { ok, at: Date.now() }
+      if (ok) {
+        if (this.failedChecks) this.log('console', 'CLIProxyAPI is answering again')
+        this.failedChecks = 0
+        continue
+      }
+      if (++this.failedChecks === 1) this.log('console', 'CLIProxyAPI did not answer a health check')
+      if (this.failedChecks < MAX_FAILED_CHECKS) continue
+      const silentFor = Math.round((MAX_FAILED_CHECKS * CHECK_INTERVAL_MS) / 1000)
+      this.log('console', `CLIProxyAPI has not answered for about ${silentFor}s; restarting it`)
+      this.hung = true
+      this.lastHangAt = Date.now()
+      this.lastError = 'Stopped answering health checks'
+      // Handled like a crash on exit: same backoff and restart count. SIGKILL also ends a stopped (SIGSTOP) process.
+      child.kill('SIGTERM')
+      setTimeout(() => this.child === child && child.kill('SIGKILL'), STOP_TIMEOUT_MS).unref()
+      return
+    }
+  }
+
+  private async ping(timeoutMs = 1000) {
     if (!this.port) return false
     try {
-      await fetch(`http://127.0.0.1:${this.port}/`, { signal: AbortSignal.timeout(1000) })
+      await fetch(`http://127.0.0.1:${this.port}/`, { signal: AbortSignal.timeout(timeoutMs) })
       return true
     } catch {
       return false
@@ -178,6 +229,8 @@ class Supervisor {
       restarts: this.restarts,
       lastExit: this.lastExit,
       lastError: this.lastError,
+      lastCheck: this.lastCheck,
+      lastHangAt: this.lastHangAt,
     }
   }
 }

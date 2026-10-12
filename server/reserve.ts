@@ -158,10 +158,10 @@ async function holdExtraUsage(f: ListedCredential, row: Row | undefined, billing
     const again = row?.reason === 'extra-usage' && !row.pending ? ' again' : ''
     await setDisabled(f.name, true, `${again}: it is using paid extra usage`)
     saveRow(held)
-  } else if (row && (row.reason !== 'extra-usage' || row.pending || row.until !== held.until || row.windows.join() !== held.windows.join())) {
+  } else if (row && !row.overridden && (row.reason !== 'extra-usage' || row.pending || row.until !== held.until || row.windows.join() !== held.windows.join())) {
     saveRow(held)
   }
-  // Disabled by the user and not tracked: theirs to enable, and held once they do.
+  // Disabled by the user, untracked or after overriding the reserve: theirs to enable, and held once they do.
 }
 
 async function applyOne(f: ListedCredential, row: Row | undefined, { short, seen }: ReturnType<typeof shortfall>, limits: ReserveLimits, now: number) {

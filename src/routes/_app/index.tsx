@@ -15,12 +15,13 @@ import {
   TimerIcon,
   ZapIcon,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
 import { CopyButton, PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
+import { validateAccountSearch } from '@/components/credentials/lib'
 import { RankedList, RequestsChart } from '@/components/usage-charts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -36,7 +37,8 @@ import { fmtAgo, fmtBytes, fmtCompact, fmtDuration, fmtMs, fmtNumber, fmtPercent
 import { queries, usageQueries } from '@/lib/queries'
 import type { ConsoleStatus } from '@/lib/types'
 
-export const Route = createFileRoute('/_app/')({ component: Overview })
+// `account` opens that account's panel, so Back closes it.
+export const Route = createFileRoute('/_app/')({ validateSearch: validateAccountSearch, component: Overview })
 
 function compareTags(a: string, b: string) {
   const pa = a.replace(/^v/, '').split('.').map(Number)
@@ -50,6 +52,7 @@ function compareTags(a: string, b: string) {
 
 function Overview() {
   const now = useNow(60_000)
+  const { account } = Route.useSearch()
   const { data: status } = useQuery(queries.status())
   const running = status?.process.state === 'running'
   const usage = useQuery(usageQueries.summary({ from: now - 86_400_000, to: now }))
@@ -70,7 +73,7 @@ function Overview() {
         }
       />
       <ProcessCard status={status} />
-      <AccountsCard running={running} />
+      <AccountsCard running={running} account={account} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Requests · 24h" icon={ZapIcon} loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
@@ -167,6 +170,20 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
   })
 
   const [expanded, setExpanded] = useState(false)
+  const [wasFolded, setWasFolded] = useState(false)
+  const now = useNow(60_000)
+  // Folding swaps the toggle for another one; keep keyboard focus on it.
+  const toggle = useRef<HTMLButtonElement>(null)
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (!refocus.current) return
+    refocus.current = false
+    toggle.current?.focus()
+  }, [expanded])
+  const setOpen = (open: boolean) => {
+    refocus.current = true
+    setExpanded(open)
+  }
 
   if (!status) return <Skeleton className="h-12 w-full rounded-xl" />
   const { process: p, cpa } = status
@@ -182,40 +199,62 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
       ? `Restarted ${fmtAgo(p.lastHangAt)} because it stopped answering.`
       : undefined
   const portPending = p.state === 'running' && !!status.config && !!p.port && status.config.port !== p.port
-  // While all is well the card shrinks to one line so the accounts come first; any problem opens it.
-  const healthy = p.state === 'running' && !failingSince && !installing && install?.phase !== 'error' && !portPending
+  // While all is well the card shrinks to one line so the accounts come first; a problem opens it.
+  // A folded card stays folded through a restart, so it doesn't jump.
+  const quiet = p.state === 'running' || ((p.state === 'starting' || p.state === 'stopping') && wasFolded)
+  const foldable = quiet && !failingSince && !installing && !portPending
+  const folded = foldable && !expanded
+  if (folded !== wasFolded) setWasFolded(folded)
   const uptime = p.startedAt ? fmtDuration(Date.now() - p.startedAt) : undefined
+  // A crash CPA recovered from on its own is otherwise invisible in the folded line.
+  const crashedAt = p.startedAfterCrash && p.lastExit && now - p.lastExit.at < 3_600_000 ? p.lastExit.at : undefined
 
-  if (healthy && !expanded) {
+  if (folded) {
     return (
       <Card size="sm" className="py-0">
-        <button
-          type="button"
-          aria-expanded={false}
-          className="flex min-w-0 items-center gap-x-2.5 px-(--card-spacing) py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          onClick={() => setExpanded(true)}
-        >
-          <StatusDot tone={meta.tone} />
-          <span className="min-w-0 flex-1 truncate">
-            <span className="font-medium">CLIProxyAPI</span>
-            <span className="text-muted-foreground tabular">
-              {' · '}
-              {[meta.label.toLowerCase(), cpa.version, uptime && `up ${uptime}`].filter(Boolean).join(' · ')}
-              {p.startedAfterHang && ' · restarted after it stopped answering'}
+        <div className="flex flex-wrap items-center gap-x-3 px-(--card-spacing)">
+          <button
+            ref={toggle}
+            type="button"
+            aria-expanded={false}
+            className="flex min-w-0 flex-1 items-center gap-x-2.5 py-3 text-left max-sm:basis-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            onClick={() => setOpen(true)}
+          >
+            <StatusDot tone={meta.tone} pulse={p.state === 'starting'} />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">CLIProxyAPI</span>
+              <span className="text-muted-foreground tabular">
+                {' · '}
+                {[meta.label.toLowerCase(), cpa.version, uptime && `up ${uptime}`].filter(Boolean).join(' · ')}
+                {p.startedAfterHang && p.lastHangAt
+                  ? ` · restarted after it stopped answering ${fmtAgo(p.lastHangAt)}`
+                  : crashedAt && ` · restarted after a crash ${fmtAgo(crashedAt)}`}
+              </span>
             </span>
-          </span>
-          {updateAvailable && (
-            <Badge variant="outline" className="shrink-0 gap-1 border-chart-1/30 text-chart-1">
-              <ArrowUpCircleIcon />
-              <span className="max-sm:hidden">Update available</span>
-              <span className="sm:hidden">Update</span>
-            </Badge>
+            {install?.phase === 'error' ? (
+              <Badge variant="outline" className="shrink-0 border-critical/30 text-critical">
+                Update failed
+              </Badge>
+            ) : (
+              updateAvailable && (
+                <Badge variant="outline" className="shrink-0 gap-1 border-chart-1/30 text-chart-1">
+                  <ArrowUpCircleIcon />
+                  <span className="max-sm:hidden">Update available</span>
+                  <span className="sm:hidden">Update</span>
+                </Badge>
+              )
+            )}
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+              <span className="max-sm:sr-only">Details</span>
+              <ChevronDownIcon className="size-4" />
+            </span>
+          </button>
+          {!status.service && (
+            <span className="-mt-1.5 pb-3 pl-4.5 text-xs text-muted-foreground sm:mt-0 sm:pb-0 sm:pl-0">
+              <KeepRunning command={status.serviceCommand} />
+            </span>
           )}
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-            <span className="max-sm:sr-only">Details</span>
-            <ChevronDownIcon className="size-4" />
-          </span>
-        </button>
+        </div>
       </Card>
     )
   }
@@ -276,8 +315,8 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
               Start
             </Button>
           )}
-          {healthy && (
-            <Button variant="ghost" size="icon-sm" aria-label="Show less" aria-expanded onClick={() => setExpanded(false)}>
+          {foldable && (
+            <Button ref={toggle} variant="ghost" size="icon-sm" aria-label="Show less" aria-expanded onClick={() => setOpen(false)}>
               <ChevronUpIcon />
             </Button>
           )}

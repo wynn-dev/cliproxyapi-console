@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 import { toast } from 'sonner'
 import { consoleApi, mgmt } from './api'
 import type { LimitReading } from './limits'
-import type { ApiKeyGroup, ConsoleStatus, CredentialsList, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
+import type { ApiKeyGroup, ConsoleStatus, CredentialsList, OrderStatus, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
 
 export const queries = {
   status: () =>
@@ -48,6 +48,13 @@ export const queries = {
       queryFn: () => consoleApi<ReserveStatus>('/reserve'),
       refetchInterval: 10_000,
     }),
+  /** Smart account order and where it put each account; updated with the reserve. */
+  order: () =>
+    queryOptions({
+      queryKey: ['console', 'order'],
+      queryFn: () => consoleApi<OrderStatus>('/order'),
+      refetchInterval: 10_000,
+    }),
   providerGroups: (provider: string) =>
     queryOptions({
       queryKey: ['mgmt', 'config', 'api-keys', provider],
@@ -77,6 +84,17 @@ export function useReserveWrite() {
     // A refetch already in flight would overwrite the saved limits with the old ones.
     onMutate: () => qc.cancelQueries({ queryKey: queries.reserve().queryKey }),
     onSuccess: (status) => qc.setQueryData(queries.reserve().queryKey, status),
+    onError: (err) => toast.error('Could not save', { description: err.message }),
+  })
+}
+
+/** Turns smart account order on or off. */
+export function useOrderWrite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) => consoleApi<OrderStatus>('/order', { method: 'PUT', body: { enabled } }),
+    onMutate: () => qc.cancelQueries({ queryKey: queries.order().queryKey }),
+    onSuccess: (status) => qc.setQueryData(queries.order().queryKey, status),
     onError: (err) => toast.error('Could not save', { description: err.message }),
   })
 }

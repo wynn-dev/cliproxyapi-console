@@ -15,6 +15,8 @@ export interface ConsoleState {
   reserve?: { '5h'?: number; weekly?: number }
   /** Hold accounts that start billing their owner for paid extra usage. On unless false. */
   holdExtraUsage?: boolean
+  /** Smart account order: the console sets Claude and Codex priorities. On unless turned off. */
+  smartOrder?: boolean
 }
 
 let cached: ConsoleState | undefined

@@ -2,10 +2,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, download, mgmt } from '@/lib/api'
-import { fmtWhen } from '@/lib/format'
+import { fmtDuration, fmtWhen } from '@/lib/format'
 import type { ReserveWindow } from '@/lib/limits'
 import { queries } from '@/lib/queries'
-import type { Cooldown, Credential, CredentialsList, ReserveHold, ReserveStatus } from '@/lib/types'
+import type { Cooldown, Credential, CredentialsList, OrderPlacement, ReserveHold, ReserveStatus } from '@/lib/types'
 
 export type CredState = 'active' | 'cooling' | 'error' | 'disabled'
 
@@ -66,6 +66,20 @@ export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) 
   return hold.overridden
     ? `Enabled by hand with ${share} or less left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
     : `Turned off by the account reserve to keep ${share} free for direct use, until ${fmtWhen(hold.until)}. Enable it to use it anyway.`
+}
+
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`
+
+/** Why smart account order put an account where it is, e.g. "Used first" and "its weekly limit resets soonest, in 1d 4h". */
+export function orderReason(p: OrderPlacement, now: number, affinity: boolean) {
+  if (p.tier === 'held') {
+    const names = (p.windows ?? []).map((w) => WINDOW_NAMES[w]).join(' and ')
+    return { title: 'Held for new conversations', detail: `Its ${names} limit is close to its reserve.${affinity ? ' Conversations already on it stay.' : ''}` }
+  }
+  const title = p.rank === 1 ? 'Used first' : `${ordinal(p.rank)} in line`
+  if (p.tier === 'unknown' || p.weeklyResetsAt === undefined) return { title, detail: 'No weekly reading yet.' }
+  const left = fmtDuration(Math.max(0, p.weeklyResetsAt - now))
+  return { title, detail: p.rank === 1 ? `Its weekly limit resets soonest, in ${left}.` : `Its weekly limit resets in ${left}.` }
 }
 
 export function cooldownLabel(cd: Cooldown) {

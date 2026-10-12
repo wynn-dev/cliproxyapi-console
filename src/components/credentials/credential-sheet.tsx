@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { BoxesIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -15,11 +16,11 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { mgmt } from '@/lib/api'
+import { consoleApi, mgmt } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtDateTime, fmtNumber, fmtPercent } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
-import type { Credential } from '@/lib/types'
+import type { Credential, OrderPlacement, OrderStatus } from '@/lib/types'
 import {
   STATE_META,
   accountName,
@@ -28,12 +29,14 @@ import {
   credState,
   downloadCredential,
   holdLabel,
+  orderReason,
   reserveHold,
   reserveNote,
   useDeleteCredentials,
   useRefreshCredentials,
   useResetCooldown,
   useSetDisabled,
+  useTicker,
 } from './lib'
 import { Countdown } from './status'
 
@@ -332,6 +335,26 @@ function Meta({ label, value, copy, title }: { label: string; value: React.React
 
 // --- Edit form -------------------------------------------------------------------------------
 
+const ORDERED_PROVIDERS = ['claude', 'codex']
+
+function OrderNote({ placement, affinity }: { placement: OrderPlacement; affinity: boolean }) {
+  const now = useTicker(!!placement.weeklyResetsAt, 60_000)
+  const reason = orderReason(placement, now, affinity)
+  return (
+    <div className="-mt-1 space-y-0.5 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+      <p>
+        <span className="font-medium text-foreground">{reason.title}.</span> {reason.detail}
+      </p>
+      <p>
+        <Link to="/settings" search={{ section: 'routing' }} className="underline underline-offset-4 hover:text-foreground">
+          Smart account order
+        </Link>{' '}
+        sorts accounts with the same priority, so CPA sees priority {placement.effective}.
+      </p>
+    </div>
+  )
+}
+
 type FormKey = 'priority' | 'weight' | 'prefix' | 'proxy_url' | 'request_retry' | 'note'
 type FormValues = Record<FormKey, string>
 
@@ -371,21 +394,36 @@ function diff(base: FormValues, v: FormValues): Record<string, unknown> {
 
 function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus: boolean }) {
   const qc = useQueryClient()
+  const order = useQuery(queries.order()).data
+  // Smart account order owns the priority of Claude and Codex accounts while it's on.
+  const ordered = !!order?.active && ORDERED_PROVIDERS.includes(credential.provider)
+  // Only enabled accounts are ranked.
+  const placement = ordered && !credential.disabled ? order.accounts[credential.name] : undefined
   const firstRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!autoFocus) return
     firstRef.current?.scrollIntoView({ block: 'center' })
     firstRef.current?.focus()
   }, [autoFocus])
-  const base = toForm(credential)
-  const [values, setValues] = useState(base)
+  // While ordered, the field edits the account's own priority; CPA holds the value the console derives from it.
+  const own = ordered ? order.own[credential.name] : undefined
+  const base = toForm(own === undefined ? credential : { ...credential, priority: own })
+  const [draft, setValues] = useState(base)
+  // Until edited here, priority follows the saved value, which smart account order may change.
+  const [priorityEdited, setPriorityEdited] = useState(false)
+  const values = priorityEdited ? draft : { ...draft, priority: base.priority }
   const [showErrors, setShowErrors] = useState(false)
   const errors = validate(values)
   const changes = diff(base, values)
   const dirty = Object.keys(changes).length > 0
 
   const save = useMutation({
-    mutationFn: (body: Record<string, unknown>) => mgmt('/credentials/fields', { method: 'PATCH', body: { name: credential.name, ...body } }),
+    mutationFn: async ({ priority, ...body }: Record<string, unknown>) => {
+      if (ordered && priority !== undefined) {
+        qc.setQueryData(queries.order().queryKey, await consoleApi<OrderStatus>('/order/own', { method: 'PUT', body: { name: credential.name, priority } }))
+      } else if (priority !== undefined) body.priority = priority
+      if (Object.keys(body).length) await mgmt('/credentials/fields', { method: 'PATCH', body: { name: credential.name, ...body } })
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['mgmt', 'credentials'] })
       setValues((v) => ({
@@ -396,6 +434,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
         prefix: v.prefix.trim(),
         proxy_url: v.proxy_url.trim(),
       }))
+      setPriorityEdited(false)
       setShowErrors(false)
       toast.success('Credential settings saved')
     },
@@ -406,7 +445,10 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
     id: `cred-${key}`,
     value: values[key],
     'aria-invalid': showErrors && !!errors[key],
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setValues((v) => ({ ...v, [key]: e.target.value })),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (key === 'priority') setPriorityEdited(true)
+      setValues((v) => ({ ...v, [key]: e.target.value }))
+    },
   })
 
   return (
@@ -436,6 +478,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
           <FieldError>{showErrors && errors.request_retry}</FieldError>
         </Field>
       </div>
+      {placement && <OrderNote placement={placement} affinity={order!.affinity} />}
       <p className="-mt-1 text-xs text-muted-foreground">
         Higher priority is tried first. Weight applies to weighted round-robin. Leave weight or retry empty to use the defaults.
       </p>
@@ -464,6 +507,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
           disabled={!dirty || save.isPending}
           onClick={() => {
             setValues(base)
+            setPriorityEdited(false)
             setShowErrors(false)
           }}
         >

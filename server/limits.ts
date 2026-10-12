@@ -1,5 +1,6 @@
 import { recordCredentialLimits } from './limit-history.ts'
 import { management } from './management.ts'
+import { applyOrder } from './order.ts'
 import { applyReserve } from './reserve.ts'
 import { db } from './usage.ts'
 
@@ -53,6 +54,7 @@ export function startLimitRecorder() {
     try {
       const files = await record()
       if (files) await applyReserve(files, limitReadings())
+      if (files) await applyOrder(files, limitReadings())
     } catch {
       // CPA restarting or busy: try again on the next tick.
     } finally {

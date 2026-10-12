@@ -273,13 +273,24 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'disabled', label: 'Disabled' },
 ]
 
-export function CredentialsTable({ files, loading }: { files: Credential[]; loading: boolean }) {
+export function CredentialsTable({
+  files,
+  loading,
+  account,
+  onAccountChange,
+}: {
+  files: Credential[]
+  loading: boolean
+  /** The credential whose panel is open, kept in the URL. */
+  account?: string
+  onAccountChange: (name?: string) => void
+}) {
   const [search, setSearch] = useState('')
   const [provider, setProvider] = useState('all')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [sorting, setSorting] = useState<SortingState>([])
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
-  const [sheet, setSheet] = useState<{ name: string; edit: boolean } | null>(null)
+  const [focusEdit, setFocusEdit] = useState(false)
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
 
   const setDisabled = useSetDisabled()
@@ -290,7 +301,10 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
 
   const handlers = useRef<Handlers>(null!)
   handlers.current = {
-    open: (c, edit = false) => setSheet({ name: c.name, edit }),
+    open: (c, edit = false) => {
+      setFocusEdit(edit)
+      onAccountChange(c.name)
+    },
     models: setModelsFor,
     toggle: (c, enabled) => setDisabled.mutate({ names: [c.name], disabled: !enabled }),
     refresh: (c) => refresh.mutate([c.name]),
@@ -348,7 +362,7 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
   const selected = table.getSelectedRowModel().rows.map((r) => r.original)
   const selectedNames = selected.map((c) => c.name)
   const filtering = !!search.trim() || provider !== 'all' || status !== 'all'
-  const sheetCredential = sheet ? (files.find((f) => f.name === sheet.name) ?? null) : null
+  const sheetCredential = account ? (files.find((f) => f.name === account) ?? null) : null
 
   return (
     <div className="space-y-3">
@@ -531,8 +545,8 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
 
       <CredentialSheet
         credential={sheetCredential}
-        focusEdit={!!sheet?.edit}
-        onOpenChange={(open) => !open && setSheet(null)}
+        focusEdit={focusEdit}
+        onOpenChange={(open) => !open && onAccountChange()}
         onShowModels={setModelsFor}
       />
       <ModelsDialog credential={modelsFor} onOpenChange={(open) => !open && setModelsFor(null)} />

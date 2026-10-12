@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangleIcon, LayersIcon } from 'lucide-react'
+import { LayersIcon, LockIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { queries, useReserveWrite } from '@/lib/queries'
+import { Spinner } from '@/components/ui/spinner'
+import { queries, useConfigWrite, useReserveWrite } from '@/lib/queries'
 import { SUBSCRIPTION_ROUTING, hasAccountPool, keepsCachesWarm } from '@/lib/routing'
 import { NumberField, SectionCard, SelectField, SwitchField, TextField } from './form'
 import { useReportDirty, useSectionForm, type FieldSpec } from './form-state'
+import { MANAGED_SETTINGS, type ManagedSetting, managedValue, showValue } from './managed'
 
 export type DirtyReporter = (id: string, dirty: boolean) => void
 
@@ -462,20 +465,15 @@ export function NetworkSection({ onDirty }: { onDirty: DirtyReporter }) {
 
 const loggingSpecs: Record<string, FieldSpec> = {
   'observability.logs.debug': { kind: 'switch', default: false },
-  'observability.logs.logging-to-file': { kind: 'switch', default: false },
   'observability.logs.request-log': { kind: 'switch', default: false },
   'observability.logs.logs-max-total-size-mb': { kind: 'number', default: 0, min: 0 },
   'observability.logs.error-logs-max-files': { kind: 'number', default: 10, min: 0 },
-  'observability.usage.usage-statistics-enabled': { kind: 'switch', default: false },
-  'observability.usage.redis-usage-queue-retention-seconds': { kind: 'number', default: 60, min: 1, max: 3600 },
 }
 
 export function LoggingSection({ onDirty }: { onDirty: DirtyReporter }) {
   const { data } = useQuery(queries.config())
   const form = useSectionForm(loggingSpecs, data, 'Logging & usage')
   useReportDirty('logging', form.dirty, onDirty)
-  const usageOff = form.loaded && form.value('observability.usage.usage-statistics-enabled') !== true
-  const fileLogsOff = form.loaded && form.value('observability.logs.logging-to-file') !== true
 
   return (
     <SectionCard title="Logging & usage" description="Application logs, request logs and the usage statistics this console reads." form={form}>
@@ -491,19 +489,6 @@ export function LoggingSection({ onDirty }: { onDirty: DirtyReporter }) {
             </>
           }
         />
-        <SwitchField
-          form={form}
-          path="observability.logs.logging-to-file"
-          label="Log to file"
-          description={
-            <>
-              Write application logs to rotating files instead of stdout. The console's Logs page reads these files.
-              <Default>off</Default>
-            </>
-          }
-        >
-          {fileLogsOff && <p className="mt-1 text-xs text-warning">The Logs page stays empty while this is off.</p>}
-        </SwitchField>
         <SwitchField
           form={form}
           path="observability.logs.request-log"
@@ -540,38 +525,49 @@ export function LoggingSection({ onDirty }: { onDirty: DirtyReporter }) {
           }
         />
       </FieldSection>
-      <FieldSection title="Usage statistics">
-        <SwitchField
-          form={form}
-          path="observability.usage.usage-statistics-enabled"
-          label="Collect usage statistics"
-          description={
-            <>
-              Aggregate per-request token and latency data in memory. This console collects it into its own history.
-              <Default>off</Default>
-            </>
-          }
-        />
-        {usageOff && (
-          <Alert className="border-warning/40 bg-warning/5">
-            <AlertTriangleIcon className="text-warning" />
-            <AlertTitle>The Usage page needs this on</AlertTitle>
-            <AlertDescription>Without usage statistics the console records no new requests, tokens or latency.</AlertDescription>
-          </Alert>
-        )}
-        <NumberField
-          form={form}
-          path="observability.usage.redis-usage-queue-retention-seconds"
-          label="Usage queue retention"
-          unit="s"
-          description={
-            <>
-              How long usage records wait in memory for a collector. The console collects every 5 seconds, so 60 or more is plenty. Max 3600.
-              <Default>60</Default>
-            </>
-          }
-        />
+      <FieldSection title="Managed by the console">
+        {MANAGED_SETTINGS.map((m) => (
+          <ManagedRow key={m.path} setting={m} config={data} />
+        ))}
       </FieldSection>
     </SectionCard>
+  )
+}
+
+/** A setting the console relies on: shown, not editable, with a way back if it was changed by hand. */
+function ManagedRow({ setting: m, config }: { setting: ManagedSetting; config: unknown }) {
+  const write = useConfigWrite()
+  const current = managedValue(config, m)
+  const drifted = current !== m.value
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <div className="min-w-0 space-y-1">
+        <div className="text-sm font-medium">{m.label}</div>
+        <p className="text-sm text-muted-foreground">{m.reason}</p>
+        {drifted && (
+          <p className="text-xs text-warning">
+            {current === undefined ? 'Missing from config.yaml' : `Set to ${showValue(current).toLowerCase()} in config.yaml`}. The console needs it to be{' '}
+            {showValue(m.value).toLowerCase()}.
+          </p>
+        )}
+      </div>
+      {drifted ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          disabled={write.isPending}
+          onClick={() => write.mutate({ path: `/${m.path.replaceAll('.', '/')}`, value: m.value }, { onSuccess: () => toast.success(`${m.label} restored`) })}
+        >
+          {write.isPending && <Spinner />}
+          Restore
+        </Button>
+      ) : (
+        <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5 text-sm text-muted-foreground">
+          <LockIcon className="size-3.5" />
+          {showValue(m.value)}
+        </span>
+      )}
+    </div>
   )
 }

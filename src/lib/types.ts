@@ -33,6 +33,8 @@ export interface ConsoleStatus {
     /** When CPA was last restarted because it stopped answering, and whether the current run is that restart. */
     lastHangAt?: number
     startedAfterHang: boolean
+    /** The current run was started after CPA exited on its own, at lastExit.at. */
+    startedAfterCrash?: boolean
   }
   cpa: { version: string | null; install: InstallProgress | null }
   config: { host: string; port: number; tls: boolean; clientKeys: string[] } | null

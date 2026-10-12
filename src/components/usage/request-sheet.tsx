@@ -1,5 +1,6 @@
-import { useNavigate } from '@tanstack/react-router'
-import { DownloadIcon } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { ArrowRightIcon, DownloadIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { CopyButton, SecretText } from '@/components/common'
@@ -10,6 +11,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { ApiError, download } from '@/lib/api'
 import { fmtMs, fmtNumber } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
+import { queries } from '@/lib/queries'
 import type { UsageRequest } from '@/lib/types'
 import { type CredentialLabels, CredentialName, ModelName, StatusLabel } from './cells'
 
@@ -31,6 +33,9 @@ export function RequestSheet({ request: r, labels, onClose }: { request: UsageRe
 
 function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
   const navigate = useNavigate()
+  // API keys from config have an auth_index too, but no account panel.
+  const files = useQuery({ ...queries.credentials(), refetchInterval: false }).data?.files
+  const account = r.authIndex ? files?.find((c) => c.auth_index === r.authIndex) : undefined
   const [downloading, setDownloading] = useState(false)
 
   const downloadLog = async () => {
@@ -85,6 +90,15 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
           <Field label="Credential" wide>
             <CredentialName authIndex={r.authIndex} labels={labels} />
             {labels.has(r.authIndex) && <div className="font-mono text-xs text-muted-foreground">{r.authIndex}</div>}
+            {account && (
+              <Link
+                to="/credentials"
+                search={{ account: account.name }}
+                className="mt-1 inline-flex items-center gap-1 text-xs underline underline-offset-4 hover:text-foreground"
+              >
+                Open account <ArrowRightIcon className="size-3" />
+              </Link>
+            )}
           </Field>
           <Field label="Client key" wide>
             {r.apiKey ? <SecretText value={r.apiKey} className="-my-1.5" /> : '—'}

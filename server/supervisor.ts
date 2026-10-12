@@ -37,6 +37,8 @@ class Supervisor {
   lastHangAt: number | undefined
   /** Whether the current run was started by that restart. */
   startedAfterHang = false
+  /** Whether the current run was started after CPA exited on its own (at lastExit.at). */
+  startedAfterCrash = false
 
   private child: ChildProcess | undefined
   private lines: OutputLine[] = []
@@ -56,7 +58,7 @@ class Supervisor {
     if (this.lines.length > MAX_LINES) this.lines.splice(0, this.lines.length - MAX_LINES)
   }
 
-  start(afterHang = false) {
+  start(afterHang = false, afterCrash = false) {
     clearTimeout(this.restartTimer)
     if (this.child) return
     if (!installedVersion()) {
@@ -69,6 +71,7 @@ class Supervisor {
     this.failedChecks = 0
     this.hung = false
     this.startedAfterHang = afterHang
+    this.startedAfterCrash = afterCrash
     this.port = readCpaConfig()?.port
     this.log('console', `Starting CLIProxyAPI ${installedVersion()}`)
 
@@ -107,7 +110,7 @@ class Supervisor {
           const afterHang = this.hung
           this.restartTimer = setTimeout(() => {
             this.restarts++
-            this.start(afterHang)
+            this.start(afterHang, !afterHang)
           }, this.backoffMs)
           this.backoffMs = Math.min(this.backoffMs * 2, 30_000)
         }
@@ -237,6 +240,7 @@ class Supervisor {
       lastCheck: this.lastCheck,
       lastHangAt: this.lastHangAt,
       startedAfterHang: this.startedAfterHang,
+      startedAfterCrash: this.startedAfterCrash,
     }
   }
 }

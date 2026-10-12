@@ -58,6 +58,7 @@ export function LimitChecksSection({ onDirty }: { onDirty: DirtyReporter }) {
                 </li>
               ))}
             </ul>
+            {failing.some(([, c]) => c.status === 401 || c.status === 403) && <p>A 401 or 403 usually means the account has to sign in again.</p>}
           </AlertDescription>
         </Alert>
       )}

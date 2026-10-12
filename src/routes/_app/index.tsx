@@ -235,8 +235,12 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
           <Meta label="Version" value={cpa.version ?? 'Not installed'} />
           <Meta label="Uptime" value={p.startedAt ? fmtDuration(Date.now() - p.startedAt) : '—'} />
           <Meta label="Listening on" value={status.config ? `${status.config.host || '0.0.0.0'}:${p.port ?? status.config.port}` : '—'} />
-          <Meta label="Crash restarts" value={p.restarts ? String(p.restarts) : 'None'} />
+          <Meta label="Auto restarts" value={p.restarts ? String(p.restarts) : 'None'} />
         </dl>
+
+        {p.state === 'running' && p.lastHangAt && (
+          <p className="text-sm text-muted-foreground">Restarted {fmtAgo(p.lastHangAt)} because it stopped answering.</p>
+        )}
 
         {p.state === 'running' && status.config && p.port && status.config.port !== p.port && (
           <Alert>

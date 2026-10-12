@@ -29,6 +29,9 @@ export interface ConsoleStatus {
     restarts: number
     lastExit?: { code: number | null; signal: string | null; at: number }
     lastError?: string
+    lastCheck?: { ok: boolean; at: number }
+    /** When CPA was last restarted because it stopped answering. */
+    lastHangAt?: number
   }
   cpa: { version: string | null; install: InstallProgress | null }
   config: { host: string; port: number; tls: boolean; clientKeys: string[] } | null

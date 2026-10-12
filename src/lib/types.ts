@@ -212,6 +212,23 @@ export interface OrderPlacement {
   effective: number
 }
 
+export interface LimitChecks {
+  /** Whether the console asks each provider's usage endpoint about idle accounts. */
+  enabled: boolean
+  /** Each account's last check, by credential file name. */
+  accounts: Record<string, LimitCheck>
+}
+
+export interface LimitCheck {
+  checkedAt: number
+  /** The last successful check: the observed_at of the reading it stored. */
+  okAt?: number
+  /** Why the last check failed, and when the next try is. */
+  error?: string
+  status?: number
+  retryAt?: number
+}
+
 // --- CPA management API -------------------------------------------------------------------
 
 export interface RecentBucket {

@@ -5,6 +5,7 @@ import { getConnInfo } from '@hono/node-server/conninfo'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono, type Context } from 'hono'
 import { proxy } from 'hono/proxy'
+import { accessLog } from './access-log.ts'
 import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
@@ -176,7 +177,7 @@ app.get('/console/api/status', (c) => {
     addresses: networkAddresses(),
     service: env.service,
     serviceCommand: consoleCommand(true),
-    collector: { lastPollAt: collector.lastPollAt || null, lastError: collector.lastError ?? null },
+    collector: { lastPollAt: collector.lastPollAt || null, lastError: collector.lastError ?? null, accessLogError: accessLog.lastError ?? null },
   })
 })
 
@@ -307,14 +308,17 @@ function usageFilter(c: Context): UsageFilter {
     provider: q.provider,
     authIndex: q.authIndex,
     apiKey: q.apiKey,
-    status: q.status === 'ok' || q.status === 'failed' ? q.status : undefined,
+    status: q.status === 'ok' || q.status === 'failed' || q.status === 'turned_away' ? q.status : undefined,
   }
 }
 
 app.get('/console/api/usage/summary', (c) => c.json(usageSummary(usageFilter(c), Number(c.req.query('tz') ?? 0))))
-app.get('/console/api/usage/requests', (c) =>
-  c.json(usageRequests(usageFilter(c), Math.min(Number(c.req.query('limit') ?? 100), 500), Number(c.req.query('before')) || undefined)),
-)
+app.get('/console/api/usage/requests', (c) => {
+  // `before` is the last row's "ts:id": turned-away requests sit between attempts by time, not id.
+  const [ts, id] = (c.req.query('before') ?? '').split(':').map(Number)
+  const before = Number.isFinite(ts) && Number.isFinite(id) ? { ts, id } : undefined
+  return c.json(usageRequests(usageFilter(c), Math.min(Number(c.req.query('limit') ?? 100), 500), before))
+})
 app.get('/console/api/usage/facets', (c) => {
   const f = usageFilter(c)
   return c.json(usageFacets(f.from, f.to))

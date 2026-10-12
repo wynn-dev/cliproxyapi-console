@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { serve } from '@hono/node-server'
+import { startAccessLog } from './access-log.ts'
 import { app, ensureInstalledAndStart, setupToken } from './app.ts'
 import { env, paths } from './env.ts'
 import { flushLimitHistory } from './limit-history.ts'
@@ -34,6 +35,7 @@ export async function startServer({ open = false } = {}) {
     await supervisor.reapOrphan()
     startCollector()
     startLimitRecorder()
+    startAccessLog()
     ensureInstalledAndStart().catch((err) => console.error(`Failed to install CLIProxyAPI: ${err.message}`))
   }).on('error', (err: NodeJS.ErrnoException) => {
     console.error(err.code === 'EADDRINUSE' ? `Port ${env.port} is already in use (is the console already running?). Try --port <port>.` : err.message)

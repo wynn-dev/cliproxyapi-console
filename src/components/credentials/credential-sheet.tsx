@@ -409,7 +409,9 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
   }, [autoFocus])
   const base = toForm(credential)
   const [draft, setValues] = useState(base)
-  const values = ordered ? { ...draft, priority: base.priority } : draft
+  // Until edited here, priority follows the saved value, which smart account order may change.
+  const [priorityEdited, setPriorityEdited] = useState(false)
+  const values = ordered || !priorityEdited ? { ...draft, priority: base.priority } : draft
   const [showErrors, setShowErrors] = useState(false)
   const errors = validate(values)
   const changes = diff(base, values)
@@ -427,6 +429,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
         prefix: v.prefix.trim(),
         proxy_url: v.proxy_url.trim(),
       }))
+      setPriorityEdited(false)
       setShowErrors(false)
       toast.success('Credential settings saved')
     },
@@ -437,7 +440,10 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
     id: `cred-${key}`,
     value: values[key],
     'aria-invalid': showErrors && !!errors[key],
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setValues((v) => ({ ...v, [key]: e.target.value })),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (key === 'priority') setPriorityEdited(true)
+      setValues((v) => ({ ...v, [key]: e.target.value }))
+    },
   })
 
   return (
@@ -496,6 +502,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
           disabled={!dirty || save.isPending}
           onClick={() => {
             setValues(base)
+            setPriorityEdited(false)
             setShowErrors(false)
           }}
         >

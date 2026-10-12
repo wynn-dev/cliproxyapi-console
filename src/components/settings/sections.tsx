@@ -206,11 +206,11 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
       description={
         <>
           Keeps part of each Claude and Codex account's limits free for people who use the account directly. If every account is held back,
-          requests fail until one resets; enable an account on the{' '}
+          requests fail until one resets; enable a reserved account on the{' '}
           <Link to="/credentials" className="underline underline-offset-4 hover:text-foreground">
             Credentials
           </Link>{' '}
-          page to use it anyway.
+          page to use it anyway. Accounts held for paid extra usage stay off.
         </>
       }
       form={form}

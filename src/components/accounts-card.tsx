@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { ArrowRightIcon } from 'lucide-react'
 import { StatusDot } from '@/components/common'
-import { CredentialStatus } from '@/components/credentials/status'
+import { Countdown, CredentialStatus } from '@/components/credentials/status'
 import { accountName, credState, holdLabel, reserveHold, reserveNote } from '@/components/credentials/lib'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -218,13 +218,18 @@ function LimitMeter({
   const pct = Math.round(w.left * 100)
   const tone = METER_TONE[w.level]
   const resets = w.resetsAt ? `resets in ${fmtUntil(w.resetsAt - now)}` : undefined
-  const caption = held
-    ? `${held.label} · back in ${fmtUntil(held.until - now)}`
-    : w.reset
-      ? 'Reset since the last reading'
-      : w.level === 'exhausted'
-        ? ['Limit reached', resets].filter(Boolean).join(' · ')
-        : resets
+  // The same countdown as the account's status, so the two never disagree.
+  const caption = held ? (
+    <>
+      {held.label} · back in <Countdown until={held.until} endLabel="a moment" />
+    </>
+  ) : w.reset ? (
+    'Reset since the last reading'
+  ) : w.level === 'exhausted' ? (
+    ['Limit reached', resets].filter(Boolean).join(' · ')
+  ) : (
+    resets
+  )
 
   return (
     <Tooltip>

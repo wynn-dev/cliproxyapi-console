@@ -60,7 +60,7 @@ export const holdLabel = (hold: ReserveHold) => (hold.reason === 'extra-usage' ?
 export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) {
   if (hold.reason === 'extra-usage') {
     const ran = hold.windows.length ? `its ${hold.windows.map((w) => LIMIT_NAMES[w] ?? w).join(' and ')} limit ran out` : 'a limit ran out'
-    return `Turned off because ${ran} and it started billing its owner for extra usage. It stays off until ${fmtWhen(hold.until)}, even if you enable it.`
+    return `Turned off because ${ran} and it started billing its owner for extra usage. It stays off until ${fmtWhen(hold.until)}; to use it anyway, turn off holding these accounts under Settings → Routing.`
   }
   const share = hold.windows.map((w) => `${limits[w]}% of its ${WINDOW_NAMES[w]} limit`).join(' and ')
   return hold.overridden
@@ -118,17 +118,37 @@ function reportBatch([verb, infinitive]: [string, string], r: BatchResult, id?: 
   }
 }
 
-/** Enables/disables credentials with an optimistic cache update. */
+/**
+ * Enables/disables credentials with an optimistic cache update. Accounts held for paid extra usage
+ * are not enabled: the console would turn them off again, after they served billed requests.
+ */
 export function useSetDisabled() {
   const qc = useQueryClient()
+  const billing = (names: string[], disabled: boolean) => {
+    const held = qc.getQueryData(queries.reserve().queryKey)?.accounts ?? {}
+    return disabled ? [] : names.filter((n) => held[n]?.reason === 'extra-usage' && held[n].until > Date.now())
+  }
+  const sendable = (names: string[], disabled: boolean) => {
+    const skip = new Set(billing(names, disabled))
+    return names.filter((n) => !skip.has(n))
+  }
   return useMutation({
     mutationFn: ({ names, disabled }: { names: string[]; disabled: boolean }) =>
-      settle(names, (name) => mgmt('/credentials/status', { method: 'PATCH', body: { name, disabled } })),
+      settle(sendable(names, disabled), (name) => mgmt('/credentials/status', { method: 'PATCH', body: { name, disabled } })),
     onMutate: async ({ names, disabled }) => {
+      const blocked = billing(names, disabled)
+      if (blocked.length) {
+        const one = blocked.length === 1
+        toast.warning(one ? `${blocked[0]} is using paid extra usage` : `${blocked.length} accounts are using paid extra usage`, {
+          description: one
+            ? "It stays off until its limit resets, so it doesn't bill its owner. To use it anyway, turn off holding these accounts under Settings → Routing."
+            : "They stay off until their limits reset, so they don't bill their owners. To use them anyway, turn off holding these accounts under Settings → Routing.",
+        })
+      }
       await qc.cancelQueries({ queryKey: KEY })
       const prev = qc.getQueryData<CredentialsList>(KEY)
       if (prev) {
-        const set = new Set(names)
+        const set = new Set(sendable(names, disabled))
         qc.setQueryData<CredentialsList>(KEY, {
           ...prev,
           files: prev.files.map((f) => (set.has(f.name) ? { ...f, disabled, status: disabled ? 'disabled' : 'active' } : f)),
@@ -138,13 +158,7 @@ export function useSetDisabled() {
     },
     onSuccess: (r, { names, disabled }, ctx) => {
       if (r.failed.length && ctx?.prev) qc.setQueryData(KEY, ctx.prev)
-      if (names.length > 1 || r.failed.length) reportBatch(disabled ? ['Disabled', 'disable'] : ['Enabled', 'enable'], r)
-      const billing = disabled ? [] : r.ok.filter((n) => qc.getQueryData(queries.reserve().queryKey)?.accounts[n]?.reason === 'extra-usage')
-      if (billing.length) {
-        toast.warning(billing.length === 1 ? `${billing[0]} is using paid extra usage` : `${billing.length} accounts are using paid extra usage`, {
-          description: 'The console turns them off again until their limits reset. Turn off holding them under Settings → Routing to use them anyway.',
-        })
-      }
+      if ((names.length > 1 && r.ok.length) || r.failed.length) reportBatch(disabled ? ['Disabled', 'disable'] : ['Enabled', 'enable'], r)
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   })

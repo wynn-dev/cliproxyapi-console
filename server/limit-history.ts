@@ -121,9 +121,25 @@ function prune() {
 /** Usage records name their credential by auth_index; history is kept by file name, like the limits table. */
 const credentials = new Map<string, { name: string; provider: string }>()
 
+export interface ListedAccount {
+  name: string
+  auth_index?: string
+  provider?: string
+  disabled?: boolean
+  priority?: number
+}
+let listed: ListedAccount[] = []
+
+/** CPA's credential list as of the last poll, for insights that need the pool as it is now. */
+export const listedCredentials = (): readonly ListedAccount[] => listed
+
+/** The credential file name and provider behind a usage record's auth_index, while CPA lists it. */
+export const credentialByIndex = (authIndex: string) => credentials.get(authIndex)
+
 /** Fed from the limits recorder's poll of CPA's credential list. */
-export function recordCredentialLimits(files: { name: string; auth_index?: string; provider?: string; quota?: Partial<LimitReading> }[]) {
+export function recordCredentialLimits(files: (ListedAccount & { quota?: Partial<LimitReading> })[]) {
   credentials.clear()
+  listed = files.map(({ name, auth_index, provider, disabled, priority }) => ({ name, auth_index, provider, disabled, priority }))
   try {
     for (const f of files) {
       if (f.auth_index) credentials.set(f.auth_index, { name: f.name, provider: f.provider ?? '' })
@@ -181,4 +197,10 @@ export function limitHistory(from: number, to: number, name?: string, { previous
     .all(from, ...(name ? [name] : [])) as unknown as LimitSample[]
   const all = [...before, ...rows]
   return all.sort((a, b) => a.name.localeCompare(b.name) || a.window.localeCompare(b.window) || a.ts - b.ts)
+}
+
+/** When each credential's history starts. */
+export function historyStarts() {
+  const rows = db.prepare('SELECT name, MIN(ts) AS ts FROM limit_history GROUP BY name').all() as { name: string; ts: number }[]
+  return new Map(rows.map((r) => [r.name, r.ts]))
 }

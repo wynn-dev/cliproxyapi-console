@@ -22,6 +22,7 @@ import { PROCESS_LABEL } from '@/components/app-sidebar'
 import { CopyButton, PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { validateAccountSearch } from '@/components/credentials/lib'
+import { ForecastLine } from '@/components/insights/forecast'
 import { RankedList, RequestsChart } from '@/components/usage-charts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -73,6 +74,7 @@ function Overview() {
         }
       />
       <ProcessCard status={status} />
+      <ForecastLine />
       <AccountsCard running={running} account={account} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

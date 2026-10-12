@@ -6,6 +6,7 @@ import {
   FlaskConicalIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
+  LightbulbIcon,
   LogOutIcon,
   PlugIcon,
   ScrollTextIcon,
@@ -38,6 +39,7 @@ const NAV = [
     items: [
       { to: '/', label: 'Overview', icon: LayoutDashboardIcon },
       { to: '/usage', label: 'Usage', icon: BarChart3Icon },
+      { to: '/insights', label: 'Insights', icon: LightbulbIcon },
       { to: '/logs', label: 'Logs', icon: ScrollTextIcon },
     ],
   },

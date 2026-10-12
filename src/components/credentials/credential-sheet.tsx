@@ -27,6 +27,7 @@ import {
   cooldownUntil,
   credState,
   downloadCredential,
+  holdLabel,
   reserveHold,
   reserveNote,
   useDeleteCredentials,
@@ -112,7 +113,7 @@ function SheetBody({
           {c.id_token?.plan_type && <Badge variant="outline" className="capitalize">{c.id_token.plan_type}</Badge>}
           <Badge variant="outline" className="gap-1.5">
             <StatusDot tone={meta.tone} />
-            {hold && !hold.overridden ? 'Reserved' : meta.label}
+            {hold && !hold.overridden ? holdLabel(hold) : meta.label}
           </Badge>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -178,7 +179,7 @@ function SheetBody({
                     'Reserve overridden'
                   ) : (
                     <>
-                      Reserved · back in <Countdown until={hold.until} endLabel="a moment" />
+                      {holdLabel(hold)} · back in <Countdown until={hold.until} endLabel="a moment" />
                     </>
                   )}
                 </AlertTitle>

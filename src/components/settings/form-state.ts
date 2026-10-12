@@ -8,7 +8,8 @@ import { useConfigWrite } from '@/lib/queries'
  * Absent config values show the documented default and are only written when the user changes them.
  */
 export type FieldSpec =
-  | { kind: 'switch'; default: boolean }
+  /** `values` stores the switch as one of two strings, on first. */
+  | { kind: 'switch'; default: boolean; values?: [on: string, off: string] }
   | { kind: 'select'; default: string }
   | { kind: 'number'; default: number; min?: number; max?: number }
   | { kind: 'text'; default?: string; validate?: (v: string) => string | undefined }
@@ -28,6 +29,7 @@ export function getPath(obj: unknown, path: string): unknown {
 function inputValue(spec: FieldSpec, raw: unknown): Value {
   switch (spec.kind) {
     case 'switch':
+      if (spec.values && typeof raw === 'string' && raw.trim()) return raw.trim().toLowerCase() === spec.values[0]
       return typeof raw === 'boolean' ? raw : spec.default
     case 'select':
       return raw == null || raw === '' ? spec.default : String(raw)
@@ -82,7 +84,14 @@ export function useSectionForm(specs: Specs, source: object | undefined, title: 
       const parts = path.split('.')
       let node = (patches[parts[0]] ??= {})
       for (const part of parts.slice(1, -1)) node = (node[part] ??= {}) as Record<string, unknown>
-      node[parts[parts.length - 1]] = spec.kind === 'number' ? Number(String(v).trim()) : typeof v === 'string' ? v.trim() : v
+      node[parts[parts.length - 1]] =
+        spec.kind === 'number'
+          ? Number(String(v).trim())
+          : spec.kind === 'switch' && spec.values
+            ? spec.values[v ? 0 : 1]
+            : typeof v === 'string'
+              ? v.trim()
+              : v
     }
     for (const [top, value] of Object.entries(patches)) {
       await write.mutateAsync({ path: `/${top}`, value, method: 'PATCH' })

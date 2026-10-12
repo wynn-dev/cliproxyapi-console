@@ -136,17 +136,22 @@ export interface UsageFacets {
 export interface ReserveStatus {
   /** Percent of each limit kept back; 0 is off. */
   limits: Record<ReserveWindow, number>
+  /** Whether accounts that start using paid extra usage are held back. */
+  extraUsage: boolean
   /** Accounts the reserve disabled, or that were enabled by hand while reserved, by credential file name. */
   accounts: Record<string, ReserveHold>
 }
 
-export interface ReserveHold {
+export type ReserveHold = {
   /** When the windows below their reserve reset (ms). */
   until: number
-  windows: ReserveWindow[]
   /** Enabled by hand while reserved: left alone until `until`. */
   overridden: boolean
-}
+} & (
+  | { reason: 'reserve'; windows: ReserveWindow[] }
+  /** Billing its owner for extra usage; `windows` are the labels of the limits that ran out. Never overridden. */
+  | { reason: 'extra-usage'; windows: string[] }
+)
 
 // --- CPA management API -------------------------------------------------------------------
 

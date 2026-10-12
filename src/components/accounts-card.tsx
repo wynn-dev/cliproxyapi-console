@@ -3,19 +3,19 @@ import { Link } from '@tanstack/react-router'
 import { ArrowRightIcon } from 'lucide-react'
 import { StatusDot } from '@/components/common'
 import { CredentialStatus } from '@/components/credentials/status'
-import { accountName, credState } from '@/components/credentials/lib'
+import { accountName, credState, reserveHold, reserveNote } from '@/components/credentials/lib'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
-import { fmtAgo } from '@/lib/format'
-import { hasReading, limitWindows, type LimitWindow } from '@/lib/limits'
+import { fmtAgo, fmtWhen } from '@/lib/format'
+import { RESERVE_WINDOWS, hasReading, limitWindows, type LimitWindow } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
-import type { Credential } from '@/lib/types'
+import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const PROVIDER_ORDER = ['claude', 'codex']
@@ -40,6 +40,7 @@ export function AccountsCard({ running }: { running: boolean }) {
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const stored = useQuery({ ...queries.limits(), enabled: running })
   const config = useQuery({ ...queries.config(), enabled: running })
+  const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
   const routing = routingOf(config.data)
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
@@ -76,7 +77,13 @@ export function AccountsCard({ running }: { running: boolean }) {
           <>
             <ul className="divide-y">
               {accounts.map((c) => (
-                <AccountRow key={c.id} account={c} reading={hasReading(c.quota) ? c.quota : stored.data?.[c.name]} now={now} />
+                <AccountRow
+                  key={c.id}
+                  account={c}
+                  reading={hasReading(c.quota) ? c.quota : stored.data?.[c.name]}
+                  reserve={reserve.data}
+                  now={now}
+                />
               ))}
             </ul>
             {config.data && (
@@ -107,8 +114,19 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{children}</div>
 }
 
-function AccountRow({ account: c, reading, now }: { account: Credential; reading?: Credential['quota']; now: number }) {
+function AccountRow({
+  account: c,
+  reading,
+  reserve,
+  now,
+}: {
+  account: Credential
+  reading?: Credential['quota']
+  reserve?: ReserveStatus
+  now: number
+}) {
   const windows = limitWindows(c.provider, reading, now)
+  const hold = reserveHold(c, reserve)
   const recent = c.recent_requests.at(-1)
   const inUse = credState(c) === 'active' && !!recent && recent.success + recent.failed > 0
   const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
@@ -132,6 +150,14 @@ function AccountRow({ account: c, reading, now }: { account: Credential; reading
             <span className="inline-flex items-center gap-2">
               <StatusDot tone="good" pulse={inUse} />
               {inUse ? 'In use' : 'Ready'}
+              {hold && reserve && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-default text-xs text-muted-foreground/80">· reserve overridden</span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">{reserveNote(hold, reserve.limits)}</TooltipContent>
+                </Tooltip>
+              )}
             </span>
           ) : (
             <CredentialStatus credential={c} />
@@ -140,9 +166,10 @@ function AccountRow({ account: c, reading, now }: { account: Credential; reading
       </div>
       {windows.length ? (
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
-          {windows.map((w) => (
-            <LimitMeter key={w.id} window={w} now={now} observedAt={observedAt} />
-          ))}
+          {windows.map((w) => {
+            const id = RESERVE_WINDOWS[w.label]
+            return <LimitMeter key={w.id} window={w} now={now} observedAt={observedAt} reserve={id && reserve?.limits[id]} />
+          })}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground lg:pt-0.5">
@@ -160,7 +187,7 @@ const METER_TONE = {
   exhausted: { track: 'bg-critical/20', fill: 'bg-critical' },
 }
 
-function LimitMeter({ window: w, now, observedAt }: { window: LimitWindow; now: number; observedAt?: number }) {
+function LimitMeter({ window: w, now, observedAt, reserve }: { window: LimitWindow; now: number; observedAt?: number; reserve?: number }) {
   const pct = Math.round(w.left * 100)
   const tone = METER_TONE[w.level]
   const resets = w.resetsAt ? `resets in ${fmtUntil(w.resetsAt - now)}` : undefined
@@ -187,7 +214,8 @@ function LimitMeter({ window: w, now, observedAt }: { window: LimitWindow; now: 
           {w.label}: {pct}% left
         </div>
         <div>{Math.round(w.used * 100)}% used</div>
-        {w.resetsAt && <div>Resets {new Date(w.resetsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>}
+        {w.resetsAt && <div>Resets {fmtWhen(w.resetsAt)}</div>}
+        {!!reserve && <div>{reserve}% kept in reserve for direct use</div>}
         {w.reset && <div>This window has reset since the last reading.</div>}
         {observedAt && <div className="opacity-80">Reported {fmtAgo(observedAt)}</div>}
       </TooltipContent>

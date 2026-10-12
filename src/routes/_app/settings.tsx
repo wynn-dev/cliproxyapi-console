@@ -2,7 +2,7 @@ import { createFileRoute, useBlocker } from '@tanstack/react-router'
 import { FileCodeIcon, NetworkIcon, RefreshCwIcon, ScrollTextIcon, ServerIcon, SplitIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { PageHeader } from '@/components/common'
-import { LoggingSection, NetworkSection, RetriesSection, RoutingSection } from '@/components/settings/sections'
+import { LoggingSection, NetworkSection, ReserveSection, RetriesSection, RoutingSection } from '@/components/settings/sections'
 import { ManagementSection, ServerSection } from '@/components/settings/server-section'
 import { YamlSection } from '@/components/settings/yaml-editor'
 import {
@@ -42,6 +42,8 @@ function SettingsPage() {
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
   const onDirty = useCallback((id: string, d: boolean) => setDirty((prev) => (prev[id] === d ? prev : { ...prev, [id]: d })), [])
   const anyDirty = Object.values(dirty).some(Boolean)
+  // A tab can hold several cards, reported as `tab` and `tab.card`.
+  const tabDirty = (tab: SectionId) => Object.entries(dirty).some(([id, d]) => d && id.split('.')[0] === tab)
 
   const blocker = useBlocker({
     shouldBlockFn: ({ next }) => anyDirty && next.pathname !== '/settings',
@@ -76,7 +78,7 @@ function SettingsPage() {
               >
                 <Icon className="size-4" />
                 <span className="flex-1">{label}</span>
-                {dirty[id] && (
+                {tabDirty(id) && (
                   <span className="size-1.5 rounded-full bg-warning" title="Unsaved changes">
                     <span className="sr-only">(unsaved changes)</span>
                   </span>
@@ -87,7 +89,13 @@ function SettingsPage() {
         </nav>
 
         <div className="min-w-0 flex-1">
-          {panel('routing', <RoutingSection onDirty={onDirty} />)}
+          {panel(
+            'routing',
+            <>
+              <RoutingSection onDirty={onDirty} />
+              <ReserveSection onDirty={onDirty} />
+            </>,
+          )}
           {panel('retries', <RetriesSection onDirty={onDirty} />)}
           {panel('network', <NetworkSection onDirty={onDirty} />)}
           {panel('logging', <LoggingSection onDirty={onDirty} />)}
@@ -107,7 +115,7 @@ function SettingsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
             <AlertDialogDescription>
-              You have unsaved changes in {SECTIONS.filter((s) => dirty[s.id]).map((s) => s.label).join(', ')}. They will be lost.
+              You have unsaved changes in {SECTIONS.filter((s) => tabDirty(s.id)).map((s) => s.label).join(', ')}. They will be lost.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

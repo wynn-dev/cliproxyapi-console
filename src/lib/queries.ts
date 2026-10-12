@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 import { toast } from 'sonner'
 import { consoleApi, mgmt } from './api'
 import type { LimitReading } from './limits'
-import type { ApiKeyGroup, ConsoleStatus, CredentialsList, ReleaseInfo, UsageFacets, UsageSummary, V8Config } from './types'
+import type { ApiKeyGroup, ConsoleStatus, CredentialsList, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
 
 export const queries = {
   status: () =>
@@ -41,6 +41,13 @@ export const queries = {
       queryFn: () => consoleApi<Record<string, LimitReading>>('/limits'),
       refetchInterval: 30_000,
     }),
+  /** Accounts the account reserve holds back. The server updates it every 5 seconds; this keeps pace with credentials. */
+  reserve: () =>
+    queryOptions({
+      queryKey: ['console', 'reserve'],
+      queryFn: () => consoleApi<ReserveStatus>('/reserve'),
+      refetchInterval: 10_000,
+    }),
   providerGroups: (provider: string) =>
     queryOptions({
       queryKey: ['mgmt', 'config', 'api-keys', provider],
@@ -58,6 +65,18 @@ export function useConfigWrite() {
       void qc.invalidateQueries({ queryKey: ['mgmt'] })
       void qc.invalidateQueries({ queryKey: ['console', 'status'] })
     },
+    onError: (err) => toast.error('Could not save', { description: err.message }),
+  })
+}
+
+/** Sets the account reserve's percentages. */
+export function useReserveWrite() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (limits: Partial<ReserveStatus['limits']>) => consoleApi<ReserveStatus>('/reserve', { method: 'PUT', body: limits }),
+    // A refetch already in flight would overwrite the saved limits with the old ones.
+    onMutate: () => qc.cancelQueries({ queryKey: queries.reserve().queryKey }),
+    onSuccess: (status) => qc.setQueryData(queries.reserve().queryKey, status),
     onError: (err) => toast.error('Could not save', { description: err.message }),
   })
 }

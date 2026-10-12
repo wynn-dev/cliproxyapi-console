@@ -2,7 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { ApiError, download, mgmt } from '@/lib/api'
-import type { Cooldown, Credential, CredentialsList } from '@/lib/types'
+import { fmtWhen } from '@/lib/format'
+import type { ReserveWindow } from '@/lib/limits'
+import type { Cooldown, Credential, CredentialsList, ReserveHold, ReserveStatus } from '@/lib/types'
 
 export type CredState = 'active' | 'cooling' | 'error' | 'disabled'
 
@@ -34,6 +36,26 @@ export function credState(c: Credential): CredState {
   if (c.status === 'error') return 'error'
   if (c.unavailable || (c.cooldowns?.length ?? 0) > 0) return 'cooling'
   return 'active'
+}
+
+/**
+ * The account reserve's hold on a credential: holding it back (disabled until `until`), or overridden
+ * (enabled by hand). None while the credential and the reserve disagree, until the server's next pass.
+ */
+export function reserveHold(c: Credential, reserve: ReserveStatus | undefined) {
+  const hold = reserve?.accounts[c.name]
+  const disabled = credState(c) === 'disabled'
+  return hold && (hold.overridden ? !disabled : disabled) ? hold : undefined
+}
+
+const WINDOW_NAMES: Record<ReserveWindow, string> = { '5h': '5\u2011hour', weekly: 'weekly' }
+
+/** Why the reserve holds an account back, or leaves it on, and until when. */
+export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) {
+  const share = hold.windows.map((w) => `${limits[w]}% of its ${WINDOW_NAMES[w]} limit`).join(' and ')
+  return hold.overridden
+    ? `Enabled by hand with ${share} or less left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
+    : `Turned off by the account reserve to keep ${share} free for direct use, until ${fmtWhen(hold.until)}. Enable it to use it anyway.`
 }
 
 export function cooldownLabel(cd: Cooldown) {

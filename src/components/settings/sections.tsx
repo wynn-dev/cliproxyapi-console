@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { AlertTriangleIcon, LayersIcon } from 'lucide-react'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { queries } from '@/lib/queries'
+import { queries, useReserveWrite } from '@/lib/queries'
 import { SUBSCRIPTION_ROUTING, hasAccountPool, keepsCachesWarm } from '@/lib/routing'
 import { NumberField, SectionCard, SelectField, SwitchField, TextField } from './form'
 import { useReportDirty, useSectionForm, type FieldSpec } from './form-state'
@@ -149,6 +150,71 @@ export function RoutingSection({ onDirty }: { onDirty: DirtyReporter }) {
             Requests for an unprefixed model only use credentials without a prefix, so prefixed credentials are reachable only as{' '}
             <code className="font-mono text-xs">prefix/model</code>.
             <Default>off</Default>
+          </>
+        }
+      />
+    </SectionCard>
+  )
+}
+
+// --- Account reserve -------------------------------------------------------------------------
+
+const RESERVE_DEFAULT = 5
+const reserveSpecs: Record<string, FieldSpec> = {
+  'limits.5h': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
+  'limits.weekly': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
+}
+
+/** Kept by the console rather than in CPA's config. */
+export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
+  const { data } = useQuery(queries.reserve())
+  const write = useReserveWrite()
+  const form = useSectionForm(reserveSpecs, data, 'Account reserve', (changes) =>
+    write.mutateAsync(
+      Object.fromEntries(Object.entries(changes).map(([path, v]) => [path.split('.')[1], v === '' ? RESERVE_DEFAULT : Number(String(v).trim())])),
+    ),
+  )
+  useReportDirty('routing.reserve', form.dirty, onDirty)
+  const held = Object.values(data?.accounts ?? {}).filter((a) => !a.overridden).length
+
+  return (
+    <SectionCard
+      title="Account reserve"
+      description={
+        <>
+          Keeps part of each Claude and Codex account's limits free for people who use the account directly. If every account is held back,
+          requests fail until one resets; enable an account on the{' '}
+          <Link to="/credentials" className="underline underline-offset-4 hover:text-foreground">
+            Credentials
+          </Link>{' '}
+          page to use it anyway.
+        </>
+      }
+      form={form}
+      footerNote={held > 0 && `${held} account${held === 1 ? ' is' : 's are'} held back right now.`}
+    >
+      <NumberField
+        form={form}
+        path="limits.5h"
+        label="5-hour reserve"
+        unit="%"
+        description={
+          <>
+            The console disables an account once this share of its 5-hour limit or less is left, and enables it again when the limit resets.
+            0 turns this off.
+            <Default>5%</Default>
+          </>
+        }
+      />
+      <NumberField
+        form={form}
+        path="limits.weekly"
+        label="Weekly reserve"
+        unit="%"
+        description={
+          <>
+            The same for the weekly limit: the account stays off until its week resets. 0 turns this off.
+            <Default>5%</Default>
           </>
         }
       />

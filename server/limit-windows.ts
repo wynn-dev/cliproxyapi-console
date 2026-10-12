@@ -28,6 +28,10 @@ const num = (v: string | undefined) => {
   return v != null && v.trim() !== '' && Number.isFinite(n) ? n : undefined
 }
 
+export type ReserveWindow = '5h' | 'weekly'
+/** The windows the account reserve covers, by the label limitWindows gives them. Model-scoped ones (Fable) are left to CPA. */
+export const RESERVE_WINDOWS: Partial<Record<string, ReserveWindow>> = { '5h': '5h', Weekly: 'weekly' }
+
 const CLAUDE_LABELS: Record<string, string> = { '5h': '5h', '7d': 'Weekly', '7d_oi': 'Fable' }
 
 function windowLabel(minutes: number | undefined, slot: string) {

@@ -11,7 +11,7 @@ import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts
 import { PACKAGE, defaults, env, paths } from './env.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitReadings } from './limits.ts'
-import { type ReserveLimits, reserveStatus, setReserveLimits } from './reserve.ts'
+import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReserveLimits } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { networkAddresses } from './urls.ts'
@@ -208,7 +208,7 @@ app.get('/console/api/limits/history', (c) => {
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
 
 app.put('/console/api/reserve', async (c) => {
-  const body: Partial<Record<keyof ReserveLimits, unknown>> = await c.req.json().catch(() => ({}))
+  const body: Partial<Record<keyof ReserveLimits | 'extraUsage', unknown>> = await c.req.json().catch(() => ({}))
   const patch: Partial<ReserveLimits> = {}
   for (const id of ['5h', 'weekly'] as const) {
     const v = body[id]
@@ -216,7 +216,9 @@ app.put('/console/api/reserve', async (c) => {
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 90) return c.json({ error: 'Reserve must be a whole percent from 0 to 90' }, 400)
     patch[id] = v
   }
+  if (body.extraUsage !== undefined && typeof body.extraUsage !== 'boolean') return c.json({ error: 'extraUsage must be true or false' }, 400)
   setReserveLimits(patch)
+  if (body.extraUsage !== undefined) setHoldExtraUsage(body.extraUsage)
   return c.json(reserveStatus())
 })
 

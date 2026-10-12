@@ -13,6 +13,8 @@ export interface ConsoleState {
   cpaPid?: number
   /** Account reserve: percent of each 5-hour and weekly limit kept back. 0 turns a window's reserve off. */
   reserve?: { '5h'?: number; weekly?: number }
+  /** Hold accounts that start billing their owner for paid extra usage. On unless false. */
+  holdExtraUsage?: boolean
 }
 
 let cached: ConsoleState | undefined

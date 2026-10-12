@@ -96,3 +96,42 @@ export function limitWindows(provider: string, reading: LimitReading | undefined
   }
   return out
 }
+
+export interface ExtraUsage {
+  /** Labels of the windows that ran out, as limitWindows gives them. */
+  windows: string[]
+  /** When the account stops billing extra usage: the reset of the window that ran out (ms). */
+  until: number
+}
+
+const BILLING = new Set(['allowed', 'allowed_warning'])
+
+/**
+ * Whether a Claude account is serving requests on paid extra usage, which bills its owner. Anthropic
+ * keeps serving such an account once a limit runs out (that window, or the overall status, reads
+ * `rejected`) as long as its overage claim stays allowed. These headers are undocumented; Claude
+ * Code reads them the same way. Codex reports a credit balance but nothing that says credits are
+ * being spent, so it is left out.
+ */
+export function extraUsage(provider: string, reading: LimitReading | undefined, now: number): ExtraUsage | undefined {
+  if (provider !== 'claude' || !hasReading(reading)) return undefined
+  const p = 'anthropic-ratelimit-unified-'
+  const s = Object.fromEntries(Object.entries(reading.signals).map(([k, v]) => [k.toLowerCase(), v.trim().toLowerCase()]))
+  if (!BILLING.has(s[`${p}overage-status`])) return undefined
+
+  const windows = limitWindows(provider, reading, now)
+  const out = windows.filter((w) => w.level === 'exhausted' && w.resetsAt !== undefined)
+  if (out.length) return { windows: out.map((w) => w.label), until: Math.max(...out.map((w) => w.resetsAt!)) }
+  // Once a window has reset since the reading, it no longer says anything about now.
+  if (s[`${p}status`] !== 'rejected' || windows.some((w) => w.reset)) return undefined
+
+  // No window says which one ran out: fall back to the overall reset unless it is the end of the
+  // extra-usage billing period, then to the soonest window reset.
+  const reset = num(s[`${p}reset`])
+  const observedAt = Date.parse(reading.observed_at ?? '') || now
+  if (reset && reset !== num(s[`${p}overage-reset`]) && reset * 1000 > now && reset * 1000 - observedAt <= 7 * 86_400_000 + 3_600_000) {
+    return { windows: [], until: reset * 1000 }
+  }
+  const soonest = windows.filter((w) => w.resetsAt !== undefined).sort((a, b) => a.resetsAt! - b.resetsAt!)[0]
+  return soonest && { windows: [], until: soonest.resetsAt! }
+}

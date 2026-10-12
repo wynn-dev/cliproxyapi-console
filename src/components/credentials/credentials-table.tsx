@@ -69,12 +69,13 @@ import {
 import { ModelsDialog } from './models-dialog'
 import { CredentialStatus } from './status'
 
-type StatusFilter = 'all' | CredState | 'reserved'
+type StatusFilter = 'all' | CredState | 'reserved' | 'signed-out'
 
-/** Accounts the console holds back are their own filter, not under Disabled. */
+/** Accounts the console holds back are their own filters, not under Disabled. */
 function filterState(c: Credential, reserve: ReserveStatus | undefined): Exclude<StatusFilter, 'all'> {
   const hold = reserveHold(c, reserve)
-  return hold && !hold.overridden ? 'reserved' : credState(c)
+  if (!hold || hold.overridden) return credState(c)
+  return hold.reason === 'signed-out' ? 'signed-out' : 'reserved'
 }
 
 interface Handlers {
@@ -269,6 +270,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'cooling', label: 'Cooling' },
   { value: 'error', label: 'Error' },
+  { value: 'signed-out', label: 'Signed out' },
   { value: 'reserved', label: 'Reserved' },
   { value: 'disabled', label: 'Disabled' },
 ]
@@ -334,7 +336,7 @@ export function CredentialsTable({
 
   const byProvider = useMemo(() => (provider === 'all' ? files : files.filter((f) => f.provider === provider)), [files, provider])
   const statusCounts = useMemo(() => {
-    const counts: Record<StatusFilter, number> = { all: byProvider.length, active: 0, cooling: 0, error: 0, reserved: 0, disabled: 0 }
+    const counts: Record<StatusFilter, number> = { all: byProvider.length, active: 0, cooling: 0, error: 0, 'signed-out': 0, reserved: 0, disabled: 0 }
     for (const f of byProvider) counts[filterState(f, reserve)]++
     return counts
   }, [byProvider, reserve])
@@ -406,7 +408,8 @@ export function CredentialsTable({
           aria-label="Status"
           className="-m-1 max-w-full overflow-x-auto p-1"
         >
-          {STATUS_FILTERS.map((s) => (
+          {/* Signed out is rare: only shown while it applies. */}
+          {STATUS_FILTERS.filter((s) => s.value !== 'signed-out' || statusCounts[s.value] || status === s.value).map((s) => (
             <ToggleGroupItem key={s.value} value={s.value} className="gap-1.5 px-2.5 data-[state=on]:font-medium">
               {s.value !== 'all' && <span className={cn('size-1.5 rounded-full', DOT[s.value])} />}
               {s.label}
@@ -558,6 +561,7 @@ const DOT: Record<Exclude<StatusFilter, 'all'>, string> = {
   active: 'bg-success',
   cooling: 'bg-warning',
   error: 'bg-critical',
+  'signed-out': 'bg-critical',
   reserved: 'bg-muted-foreground/50',
   disabled: 'bg-muted-foreground/50',
 }

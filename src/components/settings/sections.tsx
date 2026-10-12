@@ -182,7 +182,9 @@ const RESERVE_DEFAULT = 5
 const reserveSpecs: Record<string, FieldSpec> = {
   'limits.5h': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
   'limits.weekly': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
+  'limits.fable': { kind: 'number', default: RESERVE_DEFAULT, min: 0, max: 90 },
   extraUsage: { kind: 'switch', default: true },
+  releaseWhenAllHeld: { kind: 'switch', default: false },
 }
 
 /** Kept by the console rather than in CPA's config. */
@@ -200,8 +202,10 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
     ),
   )
   useReportDirty('routing.reserve', form.dirty, onDirty)
-  const held = Object.values(data?.accounts ?? {}).filter((a) => !a.overridden).length
+  const held = Object.values(data?.accounts ?? {}).filter((a) => !a.overridden && a.reason !== 'signed-out').length
+  const signedOut = Object.values(data?.accounts ?? {}).filter((a) => a.reason === 'signed-out').length
   const billing = Object.values(data?.accounts ?? {}).filter((a) => a.reason === 'extra-usage').length
+  const fable = Object.keys(data?.fable ?? {}).length
 
   return (
     <SectionCard
@@ -209,7 +213,7 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
       description={
         <>
           Keeps part of each Claude and Codex account's limits free for people who use the account directly. If every account is held back,
-          requests fail until one resets; enable a reserved account on the{' '}
+          requests fail until one resets, unless you let the console release one below; you can also enable a reserved account on the{' '}
           <Link to="/credentials" className="underline underline-offset-4 hover:text-foreground">
             Credentials
           </Link>{' '}
@@ -217,7 +221,15 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
         </>
       }
       form={form}
-      footerNote={held > 0 && `${held} account${held === 1 ? ' is' : 's are'} held back right now.`}
+      footerNote={
+        (held > 0 || signedOut > 0) &&
+        [
+          held > 0 && `${held} account${held === 1 ? ' is' : 's are'} held back right now.`,
+          signedOut > 0 && `${signedOut} ${held > 0 ? '' : `account${signedOut === 1 ? '' : 's'} `}need${signedOut === 1 ? 's' : ''} a new sign-in.`,
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
     >
       <NumberField
         form={form}
@@ -244,6 +256,21 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
           </>
         }
       />
+      <NumberField
+        form={form}
+        path="limits.fable"
+        label="Fable reserve"
+        unit="%"
+        description={
+          <>
+            Claude's Fable models have their own weekly limit. Once this share of it or less is left, the account stops taking Fable requests
+            until that limit resets; every other model keeps working on it. 0 turns this off, but while accounts using paid extra usage are
+            held (below), Fable is still held once its limit runs out.
+            {fable > 0 && ` Holding Fable on ${fable} account${fable === 1 ? '' : 's'} right now.`}
+            <Default>5%</Default>
+          </>
+        }
+      />
       <SwitchField
         form={form}
         path="extraUsage"
@@ -254,6 +281,18 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
             disables it until that limit resets, and turns it off again if you enable it.
             {billing > 0 && ` Holding ${billing} account${billing === 1 ? '' : 's'} for this right now.`}
             <Default>on</Default>
+          </>
+        }
+      />
+      <SwitchField
+        form={form}
+        path="releaseWhenAllHeld"
+        label="When every account is held back, release the one with the most left"
+        description={
+          <>
+            Instead of failing requests, the console turns on the reserved account with the most left, and holds it again once another account
+            has been back for a few minutes. Accounts using paid extra usage or needing a new sign-in are never released.
+            <Default>off</Default>
           </>
         }
       />

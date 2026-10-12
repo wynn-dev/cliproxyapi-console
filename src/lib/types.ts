@@ -164,23 +164,41 @@ export interface UsageFacets {
 }
 
 export interface ReserveStatus {
-  /** Percent of each limit kept back; 0 is off. */
-  limits: Record<ReserveWindow, number>
+  /** Percent of each limit kept back; 0 is off. `fable` holds only the Fable models. */
+  limits: Record<ReserveWindow | 'fable', number>
   /** Whether accounts that start using paid extra usage are held back. */
   extraUsage: boolean
-  /** Accounts the reserve disabled, or that were enabled by hand while reserved, by credential file name. */
+  /** Whether the reserved account with the most left is released when every account of a provider is held back. */
+  releaseWhenAllHeld: boolean
+  /** Accounts the console disabled, or that were enabled by hand while reserved, by credential file name. */
   accounts: Record<string, ReserveHold>
+  /** Accounts whose Fable models are held back, by credential file name. */
+  fable: Record<string, FableHold>
+  /** Accounts that look signed out but stay in rotation, by credential file name. */
+  warnings: Record<string, SignInWarning>
+}
+
+export interface SignInWarning {
+  /** `signed-out`: likely needs a new sign-in. `problem`: 403s, which a new sign-in may not fix. */
+  kind: 'signed-out' | 'problem'
+  detail: string
+  /** Why the console did not turn it off although CPA says its tokens are dead. */
+  kept?: string
 }
 
 export type ReserveHold = {
-  /** When the windows below their reserve reset (ms). */
+  /** When the hold ends (ms); 0 when it waits for a new sign-in. */
   until: number
   /** Enabled by hand while reserved: left alone until `until`. */
   overridden: boolean
+  /** Overridden by the console because every account was held back. */
+  released?: boolean
 } & (
   | { reason: 'reserve'; windows: ReserveWindow[] }
   /** Billing its owner for extra usage; `windows` are the labels of the limits that ran out. Never overridden. */
   | { reason: 'extra-usage'; windows: string[] }
+  /** Needs a new sign-in; `detail` is the error the provider gave. Never overridden. */
+  | { reason: 'signed-out'; windows: string[]; detail?: string }
 )
 
 export interface OrderStatus {
@@ -227,6 +245,13 @@ export interface LimitCheck {
   error?: string
   status?: number
   retryAt?: number
+}
+
+export interface FableHold {
+  /** When the Fable window resets (ms). */
+  until: number
+  /** Held because the Fable limit ran out with paid extra usage on, not for the reserve. */
+  billing: boolean
 }
 
 // --- CPA management API -------------------------------------------------------------------

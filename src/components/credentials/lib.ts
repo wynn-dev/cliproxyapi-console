@@ -5,8 +5,9 @@ import { toast } from 'sonner'
 import { ApiError, download, mgmt } from '@/lib/api'
 import { fmtDuration, fmtWhen } from '@/lib/format'
 import type { ReserveWindow } from '@/lib/limits'
+import { OAUTH_PROVIDERS } from '@/lib/providers'
 import { queries } from '@/lib/queries'
-import type { Cooldown, Credential, CredentialsList, OrderPlacement, ReserveHold, ReserveStatus } from '@/lib/types'
+import type { Cooldown, Credential, CredentialsList, OrderPlacement, ReserveHold, ReserveStatus, SignInWarning } from '@/lib/types'
 
 export type CredState = 'active' | 'cooling' | 'error' | 'disabled'
 
@@ -86,15 +87,38 @@ const WINDOW_NAMES: Record<ReserveWindow, string> = { '5h': '5\u2011hour', weekl
 const LIMIT_NAMES: Record<string, string> = { '5h': '5\u2011hour', Weekly: 'weekly' }
 
 /** What the status shows for an account the console holds back. */
-export const holdLabel = (hold: ReserveHold) => (hold.reason === 'extra-usage' ? 'Paid extra usage' : 'Reserved')
+export const holdLabel = (hold: ReserveHold) => (hold.reason === 'extra-usage' ? 'Paid extra usage' : hold.reason === 'signed-out' ? 'Signed out' : 'Reserved')
+
+/** A sign-in warning on an account the console leaves on. */
+export const signInWarning = (c: Credential, reserve: ReserveStatus | undefined) => (reserveHold(c, reserve) ? undefined : reserve?.warnings?.[c.name])
+
+export const warningLabel = (w: SignInWarning) => (w.kind === 'problem' ? 'Sign-in problem' : 'May be signed out')
+
+export function warningNote(w: SignInWarning) {
+  const detail = w.detail.replace(/[\s.]*$/, '.')
+  if (w.kept) return `Its sign-in no longer works: ${detail} The console left it on: ${w.kept}`
+  return w.kind === 'problem'
+    ? `The provider keeps refusing this account (403). It may be suspended or blocked in its region, which a new sign-in won't fix. Last error: ${detail}`
+    : `The provider keeps rejecting this account's sign-in, but the console leaves it on: this can also be an outage. Last error: ${detail}`
+}
+
+/** OAuth accounts the console can sign in again. */
+export const canSignIn = (c: Credential) => OAUTH_PROVIDERS.some((p) => p.id === c.provider) && c.account_type !== 'api_key' && !c.runtime_only
 
 /** Why the reserve holds an account back, or leaves it on, and until when. */
 export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) {
+  if (hold.reason === 'signed-out') {
+    const detail = hold.detail ? ` ${hold.detail.replace(/[\s.]*$/, '.')}` : ''
+    return `Turned off because its sign-in no longer works:${detail} Sign in again to put it back in rotation; its priority, note and excluded models are kept.`
+  }
   if (hold.reason === 'extra-usage') {
     const ran = hold.windows.length ? `its ${hold.windows.map((w) => LIMIT_NAMES[w] ?? w).join(' and ')} limit ran out` : 'a limit ran out'
     return `Turned off because ${ran} and it started billing its owner for extra usage. It stays off until ${fmtWhen(hold.until)}; to use it anyway, turn off holding these accounts under Settings → Routing.`
   }
   const share = hold.windows.map((w) => `${limits[w]}% of its ${WINDOW_NAMES[w]} limit`).join(' and ')
+  if (hold.released) {
+    return `Turned on again with ${share} or less left because every account was held back. It is held again once another account has been back for a few minutes; its limit resets ${fmtWhen(hold.until)}.`
+  }
   return hold.overridden
     ? `Enabled by hand with ${share} or less left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
     : `Turned off by the account reserve to keep ${share} free for direct use, until ${fmtWhen(hold.until)}. Enable it to use it anyway.`

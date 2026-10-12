@@ -69,6 +69,8 @@ routing:
   # session where it started.
   strategy: "fill-first"
   session-affinity: true
+  # A server error or overload moves only that request to another account, not the whole session.
+  session-affinity-rebind-on: "quota"
   cooldown:
     # Remember exhausted accounts across restarts.
     save-cooldown-status: true

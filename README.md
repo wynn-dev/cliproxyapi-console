@@ -15,6 +15,27 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 - **Settings**: documented forms for routing, retries, networking and logging, plus a YAML editor with diff review.
 - **Logs & playground**: live log tail, CPA process output, request and error logs, and a streaming chat tester.
 
+## Preview
+
+![Overview: CPA status, the run-out forecast, accounts available and each account's limits](docs/screenshots/overview.png)
+
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/account-panel.png"><img src="docs/screenshots/account-panel.png" alt="Account panel"></a><br>An account's panel: why it is held back, its limits and its last 24 hours.</td>
+    <td width="50%"><a href="docs/screenshots/usage.png"><img src="docs/screenshots/usage.png" alt="Usage page"></a><br>Usage: requests, tokens, latency and value at API prices, by model, account and client key.</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/insights.png"><img src="docs/screenshots/insights.png" alt="Insights page"></a><br>Insights: when the pool runs out, conversations that lost their prompt cache, and the last 7 days.</td>
+    <td><a href="docs/screenshots/settings-routing.png"><img src="docs/screenshots/settings-routing.png" alt="Routing settings"></a><br>Settings → Routing: strategy, sticky sessions, the account reserve and smart account order.</td>
+  </tr>
+  <tr>
+    <td><a href="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-dark.png" alt="Overview in dark mode"></a><br>Dark mode.</td>
+    <td><a href="docs/screenshots/overview-phone.png"><img src="docs/screenshots/overview-phone.png" alt="Overview on a phone" width="195"></a><br>On a phone.</td>
+  </tr>
+</table>
+
+The screenshots show a demo setup with made-up accounts and traffic.
+
 ## Quick start
 
 Requires Node.js 22.13 or newer.

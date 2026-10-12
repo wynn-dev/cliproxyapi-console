@@ -1,3 +1,4 @@
+import { recordCredentialLimits } from './limit-history.ts'
 import { management } from './management.ts'
 import { applyReserve } from './reserve.ts'
 import { db } from './usage.ts'
@@ -31,6 +32,7 @@ async function record() {
     const signals = f.quota?.signals ?? {}
     if (at && Object.keys(signals).length) upsert.run(f.name, at, JSON.stringify(signals))
   }
+  recordCredentialLimits(files ?? [])
   return files ?? []
 }
 

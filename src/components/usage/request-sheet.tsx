@@ -104,7 +104,12 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
         </Section>
 
         <Section title="Tokens">
-          <Field label="Input">{fmtNumber(r.input)}</Field>
+          <Field label="Input">
+            {fmtNumber(r.input)}
+            {r.cached + r.cacheWrite > 0 && (
+              <span className="text-muted-foreground"> · {fmtNumber(Math.max(0, r.input - r.cached - r.cacheWrite))} uncached</span>
+            )}
+          </Field>
           <Field label="Output">{fmtNumber(r.output)}</Field>
           <Field label="Cache read">{fmtNumber(r.cached)}</Field>
           <Field label="Cache write">{fmtNumber(r.cacheWrite)}</Field>

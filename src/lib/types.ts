@@ -54,6 +54,10 @@ export interface OutputLine {
   text: string
 }
 
+/**
+ * Token counts mean the same for every provider: input is every prompt token, cache reads (cached)
+ * and writes (cacheWrite) included; output includes reasoning; total is input + output.
+ */
 export interface UsageMetrics {
   requests: number
   failed: number
@@ -61,6 +65,7 @@ export interface UsageMetrics {
   output: number
   reasoning: number
   cached: number
+  cacheWrite: number
   total: number
   avgLatency: number | null
   avgTtft: number | null
@@ -73,6 +78,7 @@ export interface UsagePoint {
   input: number
   output: number
   cached: number
+  cacheWrite: number
   total: number
   avgLatency: number | null
 }

@@ -9,6 +9,7 @@ import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
 import { PACKAGE, defaults, env, paths } from './env.ts'
+import { limitHistory } from './limit-history.ts'
 import { limitReadings } from './limits.ts'
 import { type ReserveLimits, reserveStatus, setReserveLimits } from './reserve.ts'
 import { readState, updateState } from './state.ts'
@@ -147,6 +148,14 @@ app.post('/console/api/process/:action', async (c) => {
 })
 
 app.get('/console/api/limits', (c) => c.json(limitReadings()))
+app.get('/console/api/limits/history', (c) => {
+  const q = c.req.query()
+  const to = q.to ? Number(q.to) : Date.now()
+  const from = q.from ? Number(q.from) : to - 7 * 86_400_000
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return c.json({ error: 'from and to must be times in ms, from before to' }, 400)
+  if (to - from > 35 * 86_400_000) return c.json({ error: 'At most 35 days at a time' }, 400)
+  return c.json(limitHistory(from, to, q.name || undefined, { previous: q.previous === '1' || q.previous === 'true' }))
+})
 
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
 

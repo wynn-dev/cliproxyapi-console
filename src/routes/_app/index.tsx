@@ -4,6 +4,8 @@ import {
   ArrowDownToLineIcon,
   ArrowRightIcon,
   ArrowUpCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleGaugeIcon,
   CoinsIcon,
   PlayIcon,
@@ -13,6 +15,7 @@ import {
   TimerIcon,
   ZapIcon,
 } from 'lucide-react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
@@ -67,6 +70,7 @@ function Overview() {
         }
       />
       <ProcessCard status={status} />
+      <AccountsCard running={running} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Requests · 24h" icon={ZapIcon} loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
@@ -86,8 +90,6 @@ function Overview() {
         />
         <StatCard label="Avg latency" icon={TimerIcon} loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
       </div>
-
-      <AccountsCard running={running} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
@@ -164,7 +166,9 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ['console', 'status'] }),
   })
 
-  if (!status) return <Skeleton className="h-36 w-full rounded-xl" />
+  const [expanded, setExpanded] = useState(false)
+
+  if (!status) return <Skeleton className="h-12 w-full rounded-xl" />
   const { process: p, cpa } = status
   const meta = PROCESS_LABEL[p.state]
   const install = cpa.install
@@ -177,6 +181,44 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
     : p.state === 'running' && p.startedAfterHang && p.lastHangAt
       ? `Restarted ${fmtAgo(p.lastHangAt)} because it stopped answering.`
       : undefined
+  const portPending = p.state === 'running' && !!status.config && !!p.port && status.config.port !== p.port
+  // While all is well the card shrinks to one line so the accounts come first; any problem opens it.
+  const healthy = p.state === 'running' && !failingSince && !installing && install?.phase !== 'error' && !portPending
+  const uptime = p.startedAt ? fmtDuration(Date.now() - p.startedAt) : undefined
+
+  if (healthy && !expanded) {
+    return (
+      <Card size="sm" className="py-0">
+        <button
+          type="button"
+          aria-expanded={false}
+          className="flex min-w-0 items-center gap-x-2.5 px-(--card-spacing) py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          onClick={() => setExpanded(true)}
+        >
+          <StatusDot tone={meta.tone} />
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium">CLIProxyAPI</span>
+            <span className="text-muted-foreground tabular">
+              {' · '}
+              {[meta.label.toLowerCase(), cpa.version, uptime && `up ${uptime}`].filter(Boolean).join(' · ')}
+              {p.startedAfterHang && ' · restarted after it stopped answering'}
+            </span>
+          </span>
+          {updateAvailable && (
+            <Badge variant="outline" className="shrink-0 gap-1 border-chart-1/30 text-chart-1">
+              <ArrowUpCircleIcon />
+              <span className="max-sm:hidden">Update available</span>
+              <span className="sm:hidden">Update</span>
+            </Badge>
+          )}
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            <span className="max-sm:sr-only">Details</span>
+            <ChevronDownIcon className="size-4" />
+          </span>
+        </button>
+      </Card>
+    )
+  }
 
   return (
     <Card>
@@ -234,23 +276,28 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
               Start
             </Button>
           )}
+          {healthy && (
+            <Button variant="ghost" size="icon-sm" aria-label="Show less" aria-expanded onClick={() => setExpanded(false)}>
+              <ChevronUpIcon />
+            </Button>
+          )}
         </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
           <Meta label="Version" value={cpa.version ?? 'Not installed'} />
-          <Meta label="Uptime" value={p.startedAt ? fmtDuration(Date.now() - p.startedAt) : '—'} />
+          <Meta label="Uptime" value={uptime ?? '—'} />
           <Meta label="Listening on" value={status.config ? `${status.config.host || '0.0.0.0'}:${p.port ?? status.config.port}` : '—'} />
           <Meta label="Auto restarts" value={p.restarts ? String(p.restarts) : 'None'} />
         </dl>
 
         {liveness && <p className="text-sm text-muted-foreground">{liveness}</p>}
 
-        {p.state === 'running' && status.config && p.port && status.config.port !== p.port && (
+        {portPending && (
           <Alert>
             <AlertTitle>Restart to apply the new port</AlertTitle>
             <AlertDescription>
-              config.yaml now uses port {status.config.port}, but CLIProxyAPI is still listening on {p.port}.
+              config.yaml now uses port {status.config!.port}, but CLIProxyAPI is still listening on {p.port}.
             </AlertDescription>
           </Alert>
         )}

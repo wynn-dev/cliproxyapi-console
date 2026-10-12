@@ -4,12 +4,18 @@ A self-contained web console for [CLIProxyAPI](https://github.com/router-for-me/
 CPA, runs it as a supervised process and gives you a polished UI to manage it. You don't install CPA separately.
 
 - **Process management**: installs the latest CPA release for your platform (checksum-verified), restarts it if it
-  crashes, and updates it in one click.
+  crashes or stops answering, and updates it in one click. `/console/health` is there for uptime monitors.
 - **Usage analytics**: CPA only keeps per-request usage for a few minutes. The console drains it continuously into
-  SQLite, so you get history by model, credential, client key and provider, with tokens, latency and failures.
+  SQLite, so you get history by model, credential, client key and provider, with tokens, latency, failures, requests
+  turned away because no account was free, and what the traffic would have cost at API prices.
 - **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how much of each is left
   and when it resets. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
-  so people who use the account directly keep some room.
+  so people who use the account directly keep some room. Accounts that start billing paid extra usage are held too, and
+  signed-out accounts are taken out of rotation with a one-click sign-in.
+- **Smart account order**: within your own priorities, the account whose weekly limit resets soonest is used first, and
+  accounts close to their reserve stop taking new conversations while ongoing ones keep their prompt cache.
+- **Insights**: when each pool will reach its reserve at the current pace, which conversations lost their prompt cache
+  and why, and a plain summary of the last 7 days.
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
 - **API providers & client keys**: structured editors instead of raw YAML.
 - **Settings**: documented forms for routing, retries, networking and logging, plus a YAML editor with diff review.

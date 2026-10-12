@@ -12,7 +12,7 @@ export interface WindowForecast {
   status: 'learning' | 'idle' | 'dry' | 'runs-out' | 'lasts'
   /** Capacity left above the reserve now, in account-windows. */
   left: number
-  /** Accounts in the pool with a reading of this window; the others are left out. */
+  /** Accounts in the pool with a reading of this window; the others count as unused (their whole limit left). */
   read: number
   /** Of those, readings over 12 hours old. */
   stale: number

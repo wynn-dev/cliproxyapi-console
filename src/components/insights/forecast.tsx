@@ -58,7 +58,7 @@ function PoolRow({ pool: p, now, reserve }: { pool: PoolForecast; now: number; r
       </div>
       {w.status !== 'learning' && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-          <Fact label="Left above the reserve" value={fmtAccounts(w.left)} hint={`Weekly limits of the accounts in the pool, counted down to the ${reserve}% reserve.`} />
+          <Fact label="Left above the reserve" value={fmtAccounts(w.left)} hint={`Weekly limits of the accounts in the pool, counted down to the ${reserve}% reserve. Accounts that haven't reported yet count as their whole limit.`} />
           {hasPace && (
             <Fact
               label="Pace"
@@ -71,7 +71,7 @@ function PoolRow({ pool: p, now, reserve }: { pool: PoolForecast; now: number; r
             <Fact
               label="Readings"
               value={[w.read < p.accounts && `${w.read} of ${p.accounts} accounts`, w.stale > 0 && `${w.stale} over 12h old`].filter(Boolean).join(' · ')}
-              hint="An account only reports its limits when it serves a request, so idle accounts have old readings or none. Turning on idle account limits (Settings → Routing) keeps them fresh."
+              hint="An account only reports its limits when it serves a request, so idle accounts have old readings or none. Accounts without a reading count as unused. Turning on idle account limits (Settings → Routing) keeps them fresh."
             />
           )}
         </dl>

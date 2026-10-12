@@ -42,11 +42,11 @@ export interface ForecastReport {
 }
 
 /**
- * Why a conversation lost its prompt cache. `moved`, `reserve`, `limit` and `failure` mean it went to
- * another account (the latter three say why); `idle` means the gap since its last request outlived
- * the cache; `compaction` means the client compacted the conversation.
+ * Why a conversation lost its prompt cache. `moved`, `reserve`, `extra-usage`, `limit` and `failure`
+ * mean it went to another account (all but `moved` say why); `idle` means the gap since its last
+ * request outlived the cache; `compaction` means the client compacted the conversation.
  */
-export type CacheBreakCause = 'reserve' | 'limit' | 'failure' | 'moved' | 'idle' | 'compaction' | 'unknown'
+export type CacheBreakCause = 'reserve' | 'extra-usage' | 'limit' | 'failure' | 'moved' | 'idle' | 'compaction' | 'unknown'
 
 export interface CacheBreak {
   ts: number

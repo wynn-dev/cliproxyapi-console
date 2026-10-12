@@ -13,6 +13,7 @@ import { auth, mgmt } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { diffLines, diffStats, type DiffHunk } from './diff'
 import { UnsavedBadge } from './form'
+import { changedSettings, type ManagedSetting } from './managed'
 import { useReportDirty } from './form-state'
 import type { DirtyReporter } from './sections'
 
@@ -38,6 +39,18 @@ interface Problem {
   blocking?: boolean
 }
 
+type Review = { server: string; changedAgain?: boolean; managed: ManagedSetting[] }
+
+/** Settings the console depends on that saving `text` over `server` would change. */
+async function managedChanges(server: string, text: string): Promise<ManagedSetting[]> {
+  const { parse } = await import('yaml')
+  try {
+    return changedSettings(parse(server), parse(text))
+  } catch {
+    return [] // the syntax check reports it
+  }
+}
+
 /** Local syntax check: CPA only answers "invalid_body" for unparsable YAML, without a position. */
 async function syntaxProblem(text: string): Promise<Problem | undefined> {
   const { parseDocument } = await import('yaml')
@@ -50,7 +63,7 @@ export function YamlSection({ onDirty }: { onDirty: DirtyReporter }) {
   const { data, error, isLoading } = useQuery(yamlQuery)
   const [base, setBase] = useState<string>()
   const [text, setText] = useState('')
-  const [review, setReview] = useState<{ server: string; changedAgain?: boolean } | null>(null)
+  const [review, setReview] = useState<Review | null>(null)
   const [problem, setProblem] = useState<Problem>()
   const [saving, setSaving] = useState(false)
   const [checking, setChecking] = useState(false)
@@ -81,7 +94,7 @@ export function YamlSection({ onDirty }: { onDirty: DirtyReporter }) {
     try {
       const [server, syntax] = await Promise.all([fetchLatest(), syntaxProblem(text)])
       setProblem(syntax)
-      setReview({ server })
+      setReview({ server, managed: await managedChanges(server, text) })
     } catch (err) {
       toast.error('Could not load the current config', { description: (err as Error).message })
     } finally {
@@ -96,7 +109,7 @@ export function YamlSection({ onDirty }: { onDirty: DirtyReporter }) {
     try {
       const latest = await fetchLatest()
       if (latest !== review.server) {
-        setReview({ server: latest, changedAgain: true })
+        setReview({ server: latest, changedAgain: true, managed: await managedChanges(latest, text) })
         return
       }
       const nextKey = secretKeyOf(text)
@@ -220,7 +233,7 @@ function ReviewDialog({
   onClose,
   onSave,
 }: {
-  review: { server: string; changedAgain?: boolean } | null
+  review: Review | null
   text: string
   base?: string
   saving: boolean
@@ -271,6 +284,22 @@ function ReviewDialog({
                   : keyAfter.startsWith('$2')
                     ? "You set a bcrypt hash, so you'll need to sign in again with the matching key."
                     : 'The plaintext value becomes the new key (CPA hashes it on reload). This browser switches to it automatically.'}
+              </AlertDescription>
+            </Alert>
+          )}
+          {!!review?.managed.length && (
+            <Alert className="border-warning/40 bg-warning/5">
+              <AlertTriangleIcon className="text-warning" />
+              <AlertTitle>This changes settings the console relies on</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {review.managed.map((m) => (
+                    <li key={m.path}>
+                      <span className="font-medium text-foreground">{m.label}</span> (<code className="font-mono text-xs">{m.path.split('.').at(-1)}</code>). {m.reason}
+                    </li>
+                  ))}
+                </ul>
+                <p>You can restore them later under Settings → Logging & usage.</p>
               </AlertDescription>
             </Alert>
           )}

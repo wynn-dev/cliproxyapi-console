@@ -107,6 +107,54 @@ app.post('/console/api/setup', async (c) => {
   return c.json({ status: 'ok' })
 })
 
+// --- Public: health check for uptime monitors ------------------------------------------------
+
+/** CPA drops queued usage records after an hour, so warn well before that. */
+const USAGE_STALE_MS = 10 * 60_000
+
+/** `ok`, or why not: CPA's process state, `unresponsive`, `not-installed` or `not-set-up`. */
+function healthStatus() {
+  if (!configExists()) return 'not-set-up'
+  if (!installedVersion()) return 'not-installed'
+  if (supervisor.state !== 'running') return supervisor.state
+  return supervisor.lastCheck?.ok ? 'ok' : 'unresponsive'
+}
+
+/**
+ * 200 while CPA is running and answered its last liveness check, 503 otherwise. Unauthenticated, so
+ * it only reports cached states, times and counts: no keys, paths or account names, and no calls to CPA.
+ */
+function health(c: Context) {
+  const p = supervisor
+  const status = healthStatus()
+  // Nothing to collect while CPA is down; otherwise count from the later of the last sync and CPA's start.
+  const syncedOrStarted = Math.max(collector.lastPollAt, (p.state === 'running' && p.startedAt) || 0)
+  const iso = (ms: number | undefined) => (ms ? new Date(ms).toISOString() : null)
+  c.header('Cache-Control', 'no-store')
+  return c.json(
+    {
+      status,
+      consoleVersion: pkg.version,
+      cpa: {
+        state: p.state,
+        uptimeSeconds: p.state === 'running' && p.startedAt ? Math.round((Date.now() - p.startedAt) / 1000) : null,
+        restarts: p.restarts,
+        lastCheck: p.lastCheck ? { ok: p.lastCheck.ok, at: iso(p.lastCheck.at) } : null,
+        lastUnresponsiveRestartAt: iso(p.lastHangAt),
+      },
+      usage: {
+        lastSyncAt: iso(collector.lastPollAt),
+        stale: p.state === 'running' && Date.now() - syncedOrStarted > USAGE_STALE_MS,
+      },
+    },
+    status === 'ok' ? 200 : 503,
+  )
+}
+
+// Also with a trailing slash, which would otherwise get the SPA's 200 and keep a monitor green.
+app.get('/console/health', health)
+app.get('/console/health/', health)
+
 // --- Authenticated --------------------------------------------------------------------------
 
 app.use('/console/api/*', async (c, next) => {

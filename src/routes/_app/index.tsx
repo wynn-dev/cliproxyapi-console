@@ -171,6 +171,12 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
   const installing = install && !['done', 'error'].includes(install.phase)
   const updateAvailable = latest.data && cpa.version && compareTags(latest.data.tag, cpa.version) > 0
   const busy = action.isPending || p.state === 'starting' || p.state === 'stopping' || !!installing
+  const failingSince = p.state === 'running' ? p.lastCheck?.failingSince : undefined
+  const liveness = failingSince
+    ? `Not answering since ${new Date(failingSince).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}. It restarts if this lasts about a minute.`
+    : p.state === 'running' && p.startedAfterHang && p.lastHangAt
+      ? `Restarted ${fmtAgo(p.lastHangAt)} because it stopped answering.`
+      : undefined
 
   return (
     <Card>
@@ -235,8 +241,10 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
           <Meta label="Version" value={cpa.version ?? 'Not installed'} />
           <Meta label="Uptime" value={p.startedAt ? fmtDuration(Date.now() - p.startedAt) : '—'} />
           <Meta label="Listening on" value={status.config ? `${status.config.host || '0.0.0.0'}:${p.port ?? status.config.port}` : '—'} />
-          <Meta label="Crash restarts" value={p.restarts ? String(p.restarts) : 'None'} />
+          <Meta label="Auto restarts" value={p.restarts ? String(p.restarts) : 'None'} />
         </dl>
+
+        {liveness && <p className="text-sm text-muted-foreground">{liveness}</p>}
 
         {p.state === 'running' && status.config && p.port && status.config.port !== p.port && (
           <Alert>

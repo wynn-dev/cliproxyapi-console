@@ -44,7 +44,7 @@ export function GroupEditor({
 }) {
   return (
     <Sheet open={target.open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 data-[side=right]:sm:max-w-xl">
+      <SheetContent className="w-full gap-0 sm:max-w-xl">
         <EditorBody key={target.session} meta={meta} groups={groups} index={target.index} onDone={() => onOpenChange(false)} />
       </SheetContent>
     </Sheet>

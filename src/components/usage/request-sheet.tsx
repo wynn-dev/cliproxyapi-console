@@ -42,7 +42,7 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
       if (err instanceof ApiError && err.status === 404) {
         toast.error('No log for this request', {
           description: 'CLIProxyAPI only writes request logs while "Request log" is enabled in Settings.',
-          action: { label: 'Settings', onClick: () => void navigate({ to: '/settings' }) },
+          action: { label: 'Settings', onClick: () => void navigate({ to: '/settings', search: { section: 'logging' } }) },
         })
       } else {
         toast.error('Download failed', { description: err instanceof Error ? err.message : String(err) })

@@ -98,7 +98,7 @@ export function AccountsCard({ running }: { running: boolean }) {
                   : keepsCachesWarm(routing)
                     ? 'One account is used until it runs out, and each conversation stays on its account.'
                     : 'How requests are spread across accounts.'}
-                <Link to="/settings" className="text-foreground underline underline-offset-4">
+                <Link to="/settings" search={{ section: 'routing' }} className="text-foreground underline underline-offset-4">
                   {scattered ? 'Fix in Settings' : 'Routing settings'}
                 </Link>
               </p>

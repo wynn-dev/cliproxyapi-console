@@ -174,7 +174,8 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
 
   return (
     <Card>
-      <CardHeader>
+      {/* On phones the buttons go below the description; beside it they push past the card's edge. */}
+      <CardHeader className="max-sm:flex max-sm:flex-col">
         <CardTitle className="flex items-center gap-2.5">
           CLIProxyAPI
           <Badge variant="outline" className="gap-1.5">
@@ -191,7 +192,7 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
             </>
           )}
         </CardDescription>
-        <CardAction className="flex gap-2">
+        <CardAction className="flex gap-2 max-sm:mt-2">
           {p.state === 'running' || p.state === 'starting' ? (
             <>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => action.mutate('restart')}>

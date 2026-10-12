@@ -50,7 +50,7 @@ export function CredentialSheet({
   return (
     <Sheet open={!!credential} onOpenChange={onOpenChange}>
       <SheetContent
-        className="w-full gap-0 data-[side=right]:sm:max-w-xl"
+        className="w-full gap-0 sm:max-w-xl"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         {credential && (

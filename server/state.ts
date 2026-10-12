@@ -11,14 +11,16 @@ export interface ConsoleState {
   autostart: boolean
   /** PID of the CPA child, so a console that was killed hard can reap it on the next start. */
   cpaPid?: number
-  /** Account reserve: percent of each 5-hour and weekly limit kept back. 0 turns a window's reserve off. */
-  reserve?: { '5h'?: number; weekly?: number }
+  /** Account reserve: percent of each 5-hour, weekly and Fable limit kept back. 0 turns a window's reserve off. */
+  reserve?: { '5h'?: number; weekly?: number; fable?: number }
   /** Hold accounts that start billing their owner for paid extra usage. On unless false. */
   holdExtraUsage?: boolean
   /** Smart account order: the console sets Claude and Codex priorities. On unless turned off. */
   smartOrder?: boolean
   /** Ask each provider's usage endpoint for idle accounts' limits. Opt-in: the endpoints are undocumented. */
   limitChecks?: boolean
+  /** When every account of a provider is held back, release the reserved one with the most left. Off unless true. */
+  releaseWhenAllHeld?: boolean
 }
 
 let cached: ConsoleState | undefined

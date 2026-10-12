@@ -308,9 +308,10 @@ async function checkNext(now = Date.now()) {
   let next: { f: Listed; readAt: number } | undefined
   for (const f of files ?? []) {
     // Subscription accounts only: an API key has no usage page. Of the disabled ones, only those the
-    // reserve holds, so it sees them recover; one the user turned off is left alone.
+    // reserve holds, so it sees them recover; one the user turned off, or that needs a new sign-in
+    // (its token is dead), is left alone.
     if (!f.provider || !ENDPOINTS[f.provider] || f.account_type !== 'oauth' || !f.auth_index) continue
-    if (f.disabled && !(f.name in held)) continue
+    if (f.disabled && (!(f.name in held) || held[f.name].reason === 'signed-out')) continue
     const readAt = Math.max(Date.parse(readings[f.name]?.observed_at ?? '') || 0, Date.parse(f.quota?.observed_at ?? '') || 0)
     if (now - readAt < STALE_MS) continue
     const row = checks.get(f.name)

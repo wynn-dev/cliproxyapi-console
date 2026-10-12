@@ -14,8 +14,10 @@ import { insights } from './insights.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitCheckStatus, setLimitChecks } from './limit-checks.ts'
 import { limitReadings } from './limits.ts'
+import { fableStatus } from './fable.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
-import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReserveLimits } from './reserve.ts'
+import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReleaseWhenAllHeld, setReserveLimits } from './reserve.ts'
+import { signInResult, signInWarnings, watchSignIn } from './sign-in.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { networkAddresses } from './urls.ts'
@@ -211,7 +213,9 @@ app.get('/console/api/limits/history', (c) => {
 
 app.route('/console/api/insights', insights)
 
-app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
+const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), warnings: signInWarnings() })
+
+app.get('/console/api/reserve', (c) => c.json(holdStatus()))
 
 app.get('/console/api/limit-checks', (c) => c.json(limitCheckStatus()))
 
@@ -223,18 +227,39 @@ app.put('/console/api/limit-checks', async (c) => {
 })
 
 app.put('/console/api/reserve', async (c) => {
-  const body: Partial<Record<keyof ReserveLimits | 'extraUsage', unknown>> = await c.req.json().catch(() => ({}))
+  const body: Partial<Record<keyof ReserveLimits | 'extraUsage' | 'releaseWhenAllHeld', unknown>> = await c.req.json().catch(() => ({}))
   const patch: Partial<ReserveLimits> = {}
-  for (const id of ['5h', 'weekly'] as const) {
+  for (const id of ['5h', 'weekly', 'fable'] as const) {
     const v = body[id]
     if (v === undefined) continue
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 90) return c.json({ error: 'Reserve must be a whole percent from 0 to 90' }, 400)
     patch[id] = v
   }
-  if (body.extraUsage !== undefined && typeof body.extraUsage !== 'boolean') return c.json({ error: 'extraUsage must be true or false' }, 400)
+  for (const k of ['extraUsage', 'releaseWhenAllHeld'] as const) {
+    if (body[k] !== undefined && typeof body[k] !== 'boolean') return c.json({ error: `${k} must be true or false` }, 400)
+  }
   setReserveLimits(patch)
-  if (body.extraUsage !== undefined) setHoldExtraUsage(body.extraUsage)
-  return c.json(reserveStatus())
+  if (typeof body.extraUsage === 'boolean') setHoldExtraUsage(body.extraUsage)
+  if (typeof body.releaseWhenAllHeld === 'boolean') setReleaseWhenAllHeld(body.releaseWhenAllHeld)
+  return c.json(holdStatus())
+})
+
+// "Sign in again" for an account: once CPA's OAuth flow completes and rewrote its file, it goes back into rotation.
+app.post('/console/api/sign-in', async (c) => {
+  const body = await c.req.json<{ state?: unknown; provider?: unknown; name?: unknown }>().catch(() => ({}) as Record<string, unknown>)
+  if (typeof body.state !== 'string' || !/^[\w.-]{1,128}$/.test(body.state)) return c.json({ error: 'Invalid state' }, 400)
+  if (body.provider !== 'claude' && body.provider !== 'codex') return c.json({ error: 'Unknown provider' }, 400)
+  if (typeof body.name !== 'string' || !body.name) return c.json({ error: 'Invalid name' }, 400)
+  try {
+    return c.json(await watchSignIn(body.state, body.provider, body.name), 202)
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 502)
+  }
+})
+
+app.get('/console/api/sign-in', (c) => {
+  const result = signInResult(c.req.query('state') ?? '')
+  return result ? c.json(result) : c.json({ error: 'Unknown sign-in' }, 404)
 })
 
 app.get('/console/api/order', (c) => c.json(orderStatus()))

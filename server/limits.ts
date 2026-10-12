@@ -1,7 +1,10 @@
+import { applyFable } from './fable.ts'
 import { recordCredentialLimits } from './limit-history.ts'
 import { management } from './management.ts'
 import { applyOrder } from './order.ts'
+import { applyRelease } from './release.ts'
 import { applyReserve } from './reserve.ts'
+import { applySignIn } from './sign-in.ts'
 import { db } from './usage.ts'
 
 /**
@@ -12,10 +15,20 @@ import { db } from './usage.ts'
 
 db.exec('CREATE TABLE IF NOT EXISTS limits (name TEXT PRIMARY KEY, observed_at INTEGER NOT NULL, signals TEXT NOT NULL)')
 
+/** The fields of CPA's credential list the console acts on. */
 export interface ListedCredential {
   name: string
   provider?: string
   disabled?: boolean
+  auth_index?: string
+  email?: string
+  status?: string
+  status_message?: string
+  unavailable?: boolean
+  next_retry_after?: string
+  modtime?: string
+  created_at?: string
+  last_refresh?: string
   quota?: { observed_at?: string; signals?: Record<string, string> }
 }
 
@@ -48,6 +61,9 @@ export function limitReadings() {
   return Object.fromEntries(rows.map((r) => [r.name, { observed_at: new Date(r.observed_at).toISOString(), signals: JSON.parse(r.signals) as Record<string, string> }]))
 }
 
+/** Stages whose last run failed, so a failure that repeats every tick is logged once. */
+const stageFailing = new Set<string>()
+
 /** Often enough that the account reserve stops an account close to its threshold. */
 const POLL_MS = 5_000
 
@@ -58,8 +74,27 @@ export function startLimitRecorder() {
     busy = true
     try {
       const files = await record()
-      if (files) await applyReserve(files, limitReadings())
-      if (files) await applyOrder(files, limitReadings())
+      if (files) {
+        const readings = limitReadings()
+        // Sign-in first: an account that needs one is held whatever its limits say. Each stage runs
+        // even when one before it failed.
+        const stages: [string, () => Promise<void>][] = [
+          ['Sign-in check', () => applySignIn(files)],
+          ['Account reserve', () => applyReserve(files, readings)],
+          ['Fable reserve', () => applyFable(files, readings)],
+          ['Release', () => applyRelease(files, readings)],
+          ['Account order', () => applyOrder(files, readings)],
+        ]
+        for (const [label, stage] of stages) {
+          await stage().then(
+            () => stageFailing.delete(label),
+            (err: Error) => {
+              if (!stageFailing.has(label)) console.error(`${label}: ${err.message}`)
+              stageFailing.add(label)
+            },
+          )
+        }
+      }
     } catch {
       // CPA restarting or busy: try again on the next tick.
     } finally {

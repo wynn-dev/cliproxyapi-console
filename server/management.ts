@@ -14,3 +14,16 @@ export async function management(path: string, init: { method?: string; body?: u
     signal: AbortSignal.timeout(10_000),
   })
 }
+
+/** An auth file's JSON as CPA has it on disk (tokens included, so never send it to the browser). */
+export async function credentialFile(name: string) {
+  const res = await management(`/credentials/download?name=${encodeURIComponent(name)}`)
+  if (!res?.ok) throw new Error(`could not read ${name}${res ? ` (HTTP ${res.status})` : ''}`)
+  return (await res.json()) as Record<string, unknown>
+}
+
+/** Sets fields of an auth file. CPA writes the file and reloads the account from it. */
+export async function patchCredential(name: string, fields: Record<string, unknown>) {
+  const res = await management('/credentials/fields', { method: 'PATCH', body: { name, ...fields } })
+  if (!res?.ok) throw new Error(`could not update ${name}${res ? ` (HTTP ${res.status})` : ''}`)
+}

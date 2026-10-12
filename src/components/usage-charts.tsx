@@ -49,14 +49,21 @@ export function RequestsChart({ series, bucketMs, className }: { series: UsagePo
 }
 
 const tokensConfig = {
-  input: { label: 'Input', color: 'var(--chart-1)' },
-  cached: { label: 'Cached input', color: 'var(--chart-3)' },
+  input: { label: 'Uncached input', color: 'var(--chart-1)' },
+  cached: { label: 'Cache read', color: 'var(--chart-3)' },
+  cacheWrite: { label: 'Cache write', color: 'var(--chart-4)' },
   output: { label: 'Output', color: 'var(--chart-2)' },
 } satisfies ChartConfig
 
 export function TokensChart({ series, bucketMs, className }: { series: UsagePoint[]; bucketMs: number; className?: string }) {
-  // CPA reports cached tokens as part of input; split them so the stack sums to the real total.
-  const data = series.map((p) => ({ t: p.t, input: Math.max(0, p.input - p.cached), cached: p.cached, output: p.output }))
+  // Input counts cache reads and writes too; split them out so the stack sums to the total.
+  const data = series.map((p) => ({
+    t: p.t,
+    input: Math.max(0, p.input - p.cached - p.cacheWrite),
+    cached: p.cached,
+    cacheWrite: p.cacheWrite,
+    output: p.output,
+  }))
   return (
     <ChartContainer config={tokensConfig} className={className ?? 'aspect-auto h-64 w-full'}>
       <BarChart data={data} barCategoryGap="15%" maxBarSize={24} margin={{ left: 0, right: 0, top: 4 }}>
@@ -69,6 +76,7 @@ export function TokensChart({ series, bucketMs, className }: { series: UsagePoin
         />
         <ChartLegend content={<ChartLegendContent />} />
         <Bar dataKey="cached" stackId="t" fill="var(--color-cached)" />
+        <Bar dataKey="cacheWrite" stackId="t" fill="var(--color-cacheWrite)" />
         <Bar dataKey="input" stackId="t" fill="var(--color-input)" />
         <Bar dataKey="output" stackId="t" fill="var(--color-output)" radius={[3, 3, 0, 0]} />
       </BarChart>

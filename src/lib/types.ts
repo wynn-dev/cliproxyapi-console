@@ -153,6 +153,28 @@ export type ReserveHold = {
   | { reason: 'extra-usage'; windows: string[] }
 )
 
+export interface OrderStatus {
+  /** The setting. */
+  enabled: boolean
+  /** On and the routing strategy is fill first, so the console sets priorities. */
+  active: boolean
+  strategy: string | null
+  /** Where the console last put each Claude and Codex account, by credential file name. */
+  accounts: Record<string, OrderPlacement>
+}
+
+export interface OrderPlacement {
+  /** `first`: has room, ordered by weekly reset. `unknown`: no weekly reading. `held`: close to its reserve. */
+  tier: 'first' | 'unknown' | 'held'
+  /** 1-based position among the provider's accounts. */
+  rank: number
+  of: number
+  weeklyResetsAt?: number
+  windows?: ReserveWindow[]
+  /** The account's own priority, restored when the feature is turned off. */
+  original: number
+}
+
 // --- CPA management API -------------------------------------------------------------------
 
 export interface RecentBucket {

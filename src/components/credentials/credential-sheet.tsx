@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { BoxesIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -19,7 +20,7 @@ import { mgmt } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtDateTime, fmtNumber, fmtPercent } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
-import type { Credential } from '@/lib/types'
+import type { Credential, OrderPlacement } from '@/lib/types'
 import {
   STATE_META,
   accountName,
@@ -28,12 +29,14 @@ import {
   credState,
   downloadCredential,
   holdLabel,
+  orderReason,
   reserveHold,
   reserveNote,
   useDeleteCredentials,
   useRefreshCredentials,
   useResetCooldown,
   useSetDisabled,
+  useTicker,
 } from './lib'
 import { Countdown } from './status'
 
@@ -332,6 +335,29 @@ function Meta({ label, value, copy, title }: { label: string; value: React.React
 
 // --- Edit form -------------------------------------------------------------------------------
 
+const ORDERED_PROVIDERS = ['claude', 'codex']
+
+function OrderNote({ placement }: { placement?: OrderPlacement }) {
+  const now = useTicker(!!placement?.weeklyResetsAt, 60_000)
+  const reason = placement && orderReason(placement, now)
+  return (
+    <div className="-mt-1 space-y-0.5 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+      {reason && (
+        <p>
+          <span className="font-medium text-foreground">{reason.title}.</span> {reason.detail}
+        </p>
+      )}
+      <p>
+        Priority is set by{' '}
+        <Link to="/settings" search={{ section: 'routing' }} className="underline underline-offset-4 hover:text-foreground">
+          smart account order
+        </Link>
+        {placement ? `. This account's own priority, ${placement.original}, breaks ties and comes back when it's off.` : '.'}
+      </p>
+    </div>
+  )
+}
+
 type FormKey = 'priority' | 'weight' | 'prefix' | 'proxy_url' | 'request_retry' | 'note'
 type FormValues = Record<FormKey, string>
 
@@ -371,6 +397,10 @@ function diff(base: FormValues, v: FormValues): Record<string, unknown> {
 
 function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus: boolean }) {
   const qc = useQueryClient()
+  const order = useQuery(queries.order()).data
+  // Smart account order owns the priority of Claude and Codex accounts while it's on.
+  const ordered = !!order?.active && ORDERED_PROVIDERS.includes(credential.provider)
+  const placement = ordered ? order.accounts[credential.name] : undefined
   const firstRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!autoFocus) return
@@ -378,7 +408,8 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
     firstRef.current?.focus()
   }, [autoFocus])
   const base = toForm(credential)
-  const [values, setValues] = useState(base)
+  const [draft, setValues] = useState(base)
+  const values = ordered ? { ...draft, priority: base.priority } : draft
   const [showErrors, setShowErrors] = useState(false)
   const errors = validate(values)
   const changes = diff(base, values)
@@ -422,7 +453,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
       <div className="grid grid-cols-3 gap-3">
         <Field data-invalid={showErrors && !!errors.priority}>
           <FieldLabel htmlFor="cred-priority">Priority</FieldLabel>
-          <Input ref={firstRef} inputMode="numeric" className="tabular" {...field('priority')} />
+          <Input ref={firstRef} inputMode="numeric" className="tabular" disabled={ordered} {...field('priority')} />
           <FieldError>{showErrors && errors.priority}</FieldError>
         </Field>
         <Field data-invalid={showErrors && !!errors.weight}>
@@ -436,6 +467,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
           <FieldError>{showErrors && errors.request_retry}</FieldError>
         </Field>
       </div>
+      {ordered && <OrderNote placement={placement} />}
       <p className="-mt-1 text-xs text-muted-foreground">
         Higher priority is tried first. Weight applies to weighted round-robin. Leave weight or retry empty to use the defaults.
       </p>

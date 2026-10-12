@@ -3,6 +3,7 @@ import { FileCodeIcon, NetworkIcon, RefreshCwIcon, ScrollTextIcon, ServerIcon, S
 import { useCallback, useState } from 'react'
 import { PageHeader } from '@/components/common'
 import { LoggingSection, NetworkSection, ReserveSection, RetriesSection, RoutingSection } from '@/components/settings/sections'
+import { OrderSection } from '@/components/settings/order-section'
 import { ManagementSection, ServerSection } from '@/components/settings/server-section'
 import { YamlSection } from '@/components/settings/yaml-editor'
 import {
@@ -94,6 +95,7 @@ function SettingsPage() {
             <>
               <RoutingSection onDirty={onDirty} />
               <ReserveSection onDirty={onDirty} />
+              <OrderSection onDirty={onDirty} />
             </>,
           )}
           {panel('retries', <RetriesSection onDirty={onDirty} />)}

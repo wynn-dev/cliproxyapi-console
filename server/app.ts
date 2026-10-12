@@ -11,6 +11,7 @@ import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts
 import { PACKAGE, defaults, env, paths } from './env.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitReadings } from './limits.ts'
+import { orderStatus, setOrderEnabled } from './order.ts'
 import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReserveLimits } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
@@ -220,6 +221,15 @@ app.put('/console/api/reserve', async (c) => {
   setReserveLimits(patch)
   if (body.extraUsage !== undefined) setHoldExtraUsage(body.extraUsage)
   return c.json(reserveStatus())
+})
+
+app.get('/console/api/order', (c) => c.json(orderStatus()))
+
+app.put('/console/api/order', async (c) => {
+  const { enabled } = await c.req.json<{ enabled?: unknown }>().catch(() => ({ enabled: undefined }))
+  if (typeof enabled !== 'boolean') return c.json({ error: 'enabled must be true or false' }, 400)
+  setOrderEnabled(enabled)
+  return c.json(orderStatus())
 })
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))

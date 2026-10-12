@@ -9,6 +9,8 @@ export interface CpaConfigSummary {
   tls: boolean
   secretKey: string
   clientKeys: string[]
+  /** routing.strategy, defaulting like CPA. */
+  strategy: string
 }
 
 let cache: { mtimeMs: number; summary: CpaConfigSummary } | undefined
@@ -34,6 +36,7 @@ export function readCpaConfig(): CpaConfigSummary | undefined {
       tls: doc.server?.tls?.enable === true,
       secretKey: String(doc.management?.['secret-key'] ?? ''),
       clientKeys: (doc.access?.['api-keys'] ?? []).filter((k: unknown) => typeof k === 'string'),
+      strategy: String(doc.routing?.strategy || 'round-robin'),
     }
     cache = { mtimeMs: stat.mtimeMs, summary }
     return summary

@@ -84,6 +84,7 @@ export function CacheBreaksCard() {
 function Headline({ report: r }: { report: CacheBreakReport }) {
   const today = r.days.at(-1)
   const top = today?.causes[0]
+  const since = format(r.from, 'EEE')
   return (
     <div className="space-y-1">
       <p className="text-base font-medium">
@@ -92,11 +93,12 @@ function Headline({ report: r }: { report: CacheBreakReport }) {
           : `${fmtNumber(today.sessions)} conversation${today.sessions === 1 ? '' : 's'} lost ${today.sessions === 1 ? 'its' : 'their'} prompt cache today${top ? `; ${CAUSES[top.cause].phrase(top.sessions)}` : ''}.`}
       </p>
       <p className="text-sm text-muted-foreground">
+        {/* Whole days, like the chart; the weekly digest counts the last 7 × 24 hours instead. */}
         {r.breaks
-          ? `This week: ${fmtNumber(r.brokenSessions)} of ${fmtNumber(r.sessions)} conversations, ${fmtCompact(r.resent)} tokens sent again uncached.`
+          ? `Since ${since}: ${fmtNumber(r.brokenSessions)} of ${fmtNumber(r.sessions)} conversations, ${fmtCompact(r.resent)} tokens sent again uncached.`
           : r.sessions
-            ? `None of ${fmtNumber(r.sessions)} conversations this week lost it.`
-            : 'No conversations this week yet. Clients that send a session id (Claude Code, Codex) show up here.'}
+            ? `None of ${fmtNumber(r.sessions)} conversations since ${since} lost it.`
+            : `No conversations since ${since} yet. Clients that send a session id (Claude Code, Codex) show up here.`}
       </p>
     </div>
   )

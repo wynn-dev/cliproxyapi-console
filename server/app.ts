@@ -9,6 +9,7 @@ import { authenticate, extractKey } from './auth.ts'
 import { failInstall, installProgress, installRelease, installedVersion, latestRelease } from './binary.ts'
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
 import { PACKAGE, defaults, env, paths } from './env.ts'
+import { insights } from './insights.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitReadings } from './limits.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
@@ -205,6 +206,8 @@ app.get('/console/api/limits/history', (c) => {
   if (to - from > 35 * 86_400_000) return c.json({ error: 'At most 35 days at a time' }, 400)
   return c.json(limitHistory(from, to, q.name || undefined, { previous: q.previous === '1' || q.previous === 'true' }))
 })
+
+app.route('/console/api/insights', insights)
 
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
 

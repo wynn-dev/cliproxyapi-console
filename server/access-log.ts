@@ -23,6 +23,12 @@ db.exec(`
 // Only API paths get a request id; the rest log "--------".
 const ACCESS_LINE = /^\[(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\] \[([0-9a-f]{8})\] \[\w+ *\] (?:\[gin_logger\.go:\d+\] )?(\d{3}) \| +(\S+) \| +(\S+) \| ([A-Z]+) +"([^"?]*)/
 // auth unavailable: 3 of 3 candidate(s) for model "claude-sonnet-4-6" (provider=claude) are in cooldown: [...]
+/**
+ * Requests that ask a model to generate. Model lists, token counts and unknown paths fail without
+ * an account being needed, so they are not turned away.
+ */
+const GENERATION_PATH =
+  /^\/(?:openai\/)?v1(?:beta)?\/(?:messages|chat\/completions|completions|responses(?:\/compact)?)$|^\/backend-api\/codex\/responses(?:\/compact)?$|^\/v1(?:beta)?\/models\/[^/]+:(?:stream)?generateContent$/
 const COOLDOWN_LINE = /^\[[^\]]+\] \[([0-9a-f]{8})\] .*auth unavailable: .* for model "([^"]+)" \(provider=([^)]*)\) are in cooldown/
 
 const UNITS: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1000, ms: 1, µs: 0.001, us: 0.001, ns: 0.000001 }
@@ -34,11 +40,18 @@ function durationMs(s: string) {
   return Math.round(ms)
 }
 
+const servedModel = db.prepare('SELECT 1 FROM requests WHERE (model = ? OR alias = ?) AND failed = 0 AND ts > ? LIMIT 1')
+
 /** Why CPA refused, for the UI to word. Empty when the logs don't say. */
-function reasonFor(status: number, cooldown: boolean, message: string) {
+function reasonFor(status: number, cooldown: boolean, message: string, model = '') {
   if (status === 401 || status === 403) return 'client_key'
   if (cooldown || /cooling down/i.test(message)) return 'cooldown'
-  if (/unknown provider for model|no auth available|auth_(unavailable|not_found)/i.test(message)) return 'no_account'
+  if (/no auth available|auth_(unavailable|not_found)/i.test(message)) return 'no_account'
+  // CPA says this both when every account for a model is disabled (the reserve) and for a model no
+  // account offers (a typo). Only a model that was served lately points to the first.
+  if (/unknown provider for model/i.test(message)) {
+    return model && servedModel.get(model, model, Date.now() - 7 * 86_400_000) ? 'no_account' : 'unknown_model'
+  }
   return ''
 }
 
@@ -58,11 +71,12 @@ const enrich = db.prepare(`
   UPDATE turned_away SET api_key = ?, model = CASE WHEN model = '' THEN ? ELSE model END, error = ?,
     reason = CASE WHEN reason = '' THEN ? ELSE reason END
   WHERE id = ?`)
-const forget = db.prepare('DELETE FROM turned_away WHERE request_id = ?')
+const forget = db.prepare('DELETE FROM turned_away WHERE request_id = ? AND ts > ?')
 
 // Attempts that were made after all get a usage record, often a few seconds after the log line.
 onUsageRecords((records) => {
-  for (const r of records) if (r.request_id) forget.run(r.request_id.slice(-8))
+  const since = Date.now() - 86_400_000
+  for (const r of records) if (r.request_id) forget.run(r.request_id.slice(-8), since)
 })
 
 /** Cooldown lines come just before the request's access line, maybe in the previous batch. */
@@ -83,7 +97,7 @@ function ingest(lines: string[]) {
     const status = Number(code)
     const cooldown = cooldowns.get(requestId)
     cooldowns.delete(requestId)
-    if (status < 400) continue
+    if (status < 400 || method !== 'POST' || !GENERATION_PATH.test(path)) continue
     // CPA logs local time, like the console's clock.
     const ts = new Date(+y, +mo - 1, +d, +h, +mi, +s).getTime()
     if (served.get(requestId, ts - 86_400_000)) continue
@@ -109,19 +123,37 @@ const jsonAt = (text: string) => {
   }
 }
 
+const MAX_LOG = 8 << 20
+
+/** The response body as text, or undefined past MAX_LOG (request logs hold whole prompts). */
+async function readCapped(res: Response) {
+  if (!res.body || Number(res.headers.get('content-length')) > MAX_LOG) return void (await res.body?.cancel())
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const chunk of res.body) {
+    size += chunk.byteLength
+    if (size > MAX_LOG) return void (await res.body.cancel().catch(() => {}))
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 /** Client key, model and error message from CPA's request log for this request, when it still has one. */
 async function addDetails(row: { id: number; requestId: string; status: number }) {
   const res = await management(`/observability/logs/requests/${row.requestId}`)
-  if (!res?.ok || Number(res.headers.get('content-length')) > 8 << 20) return void (await res?.body?.cancel())
-  const log = await res.text()
+  if (!res?.ok) return void (await res?.body?.cancel())
+  const log = await readCapped(res)
+  if (log === undefined) return
   const masked = [...section(log, 'HEADERS').matchAll(/^(?:authorization|x-api-key|x-goog-api-key|api-key): *(?:bearer +)?(\S+)/gim)].map((m) => m[1])
-  const keys = (readCpaConfig()?.clientKeys ?? []).filter((k) => masked.includes(maskKey(k)))
+  // A refused key is not one of ours, even when its first and last four characters match one.
+  const refused = row.status === 401 || row.status === 403
+  const keys = refused ? [] : (readCpaConfig()?.clientKeys ?? []).filter((k) => masked.includes(maskKey(k)))
   const body = jsonAt(section(log, 'REQUEST BODY'))
   const model = typeof body?.model === 'string' ? body.model.slice(0, 200) : ''
   const response = jsonAt(section(log, 'API RESPONSE'))
   const err = response?.error
   const message = String((typeof err === 'string' ? err : err?.message) ?? response?.message ?? '').slice(0, 500)
-  enrich.run(keys.length === 1 ? keys[0] : '', model, message, reasonFor(row.status, false, message), row.id)
+  enrich.run(keys.length === 1 ? keys[0] : '', model, message, reasonFor(row.status, false, message, model), row.id)
 }
 
 const BATCH = 2000

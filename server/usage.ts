@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
-import { LONG_CONTEXT_STEPS, apiValue, priceFor } from './api-prices.ts'
+import { LONG_CONTEXT_STEPS, apiValue } from './api-prices.ts'
 import { keyMatchesConfig } from './auth.ts'
 import { env, paths } from './env.ts'
 import { readState } from './state.ts'
@@ -352,9 +352,17 @@ export interface UsageFilter {
   status?: 'ok' | 'failed' | 'turned_away'
 }
 
+/** The client request an attempt belongs to (see TURN_KEY for ids with several successes). */
 const REQUEST_KEY = "COALESCE(NULLIF(request_id, ''), '#' || id)"
-/** Whether an attempt's client request succeeded in the end, with this attempt or another. */
-const REQUEST_OK = "(failed = 0 OR (request_id != '' AND EXISTS (SELECT 1 FROM requests o WHERE o.request_id = requests.request_id AND o.failed = 0)))"
+/**
+ * A Codex websocket session keeps one request_id for all its turns, so there a success ends a
+ * request and the next attempt with that id starts a new one. Sorting every attempt for this costs
+ * as much as the rest of the summary, so it is only done for ids with more than one success.
+ */
+const TURN_KEY = `request_id || ':' || TOTAL(failed = 0) OVER (PARTITION BY request_id ORDER BY ts, id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)`
+/** Whether an attempt's client request succeeded in the end: with this attempt or the next success with its id. */
+const REQUEST_OK = `(failed = 0 OR (request_id != '' AND EXISTS (SELECT 1 FROM requests o WHERE o.request_id = requests.request_id
+  AND o.failed = 0 AND (o.ts > requests.ts OR (o.ts = requests.ts AND o.id > requests.id)))))`
 
 function filterSql(f: UsageFilter, extra: (string | false)[]) {
   const clauses = ['ts >= ?', 'ts < ?']
@@ -392,22 +400,21 @@ function source(from: number, to: number) {
 /** The same filter for turned-away requests, which never reached a credential or succeeded. */
 const whereTurnedAway = (f: UsageFilter) => filterSql(f, [(!!f.authIndex || f.status === 'ok') && '0'])
 
-// API-price value of an attempt, for SQL: node:sqlite calls back into JS per row.
-const priced = new Map<string, boolean>()
-db.function('api_priced', { deterministic: true }, (model) => {
-  const m = String(model)
-  if (!priced.has(m)) priced.set(m, !!priceFor(m))
-  return priced.get(m) ? 1 : 0
-})
+// API-price value of an attempt, or NULL without a price, for SQL: node:sqlite calls back into JS per row.
 db.function('api_value', { deterministic: true }, (model, tier, uncached, cacheRead, cacheWrite, output, input) => {
   const band = LONG_CONTEXT_STEPS.filter((n) => Number(input) > n).length
   const tokens = { uncached: Number(uncached), cacheRead: Number(cacheRead), cacheWrite: Number(cacheWrite), output: Number(output) }
   return apiValue(String(model), String(tier), tokens, band) ?? null
 })
 const PRICE_MODEL = "COALESCE(NULLIF(response_model, ''), model)"
-const VALUE = `api_value(${PRICE_MODEL}, COALESCE(NULLIF(response_service_tier, ''), service_tier),
+const PRICE_TIER = "COALESCE(NULLIF(response_service_tier, ''), service_tier)"
+const VALUE = `api_value(${PRICE_MODEL}, ${PRICE_TIER},
   MAX(input_tokens - cached_tokens - cache_write_tokens, 0), cached_tokens, cache_write_tokens, output_tokens, input_tokens)`
-const UNPRICED = `CASE WHEN api_priced(${PRICE_MODEL}) THEN 0 ELSE input_tokens + output_tokens END`
+/**
+ * Attempts in the filter with their value as `v`. LIMIT keeps SQLite from inlining the subquery,
+ * which would call api_value once for each use of `v`.
+ */
+const valued = (src: string, w: { sql: string }, extra = '') => `(SELECT *, ${VALUE} AS v${extra} FROM ${src} WHERE ${w.sql} LIMIT -1)`
 
 /** Sums over attempts, for one client request or one credential. */
 const ATTEMPT_SUMS = `
@@ -415,7 +422,7 @@ const ATTEMPT_SUMS = `
   TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output, TOTAL(reasoning_tokens) AS reasoning,
   TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite, TOTAL(total_tokens) AS total,
   TOTAL(latency_ms) AS latency, TOTAL(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS ttft,
-  TOTAL(stream = 1 AND ttft_ms > 0) AS ttftCount, TOTAL(${VALUE}) AS value, TOTAL(${UNPRICED}) AS unpricedTokens`
+  TOTAL(stream = 1 AND ttft_ms > 0) AS ttftCount, TOTAL(v) AS value, TOTAL(CASE WHEN v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens`
 
 /**
  * Metrics from rows of ATTEMPT_SUMS. With one row per client request, a request failed when all its
@@ -462,11 +469,17 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
 
   // One row per client request, built once. Bare columns come from its first attempt (SQLite takes
   // them from the MIN(ts) row), so a request belongs to the model, provider and key it started with.
+  const requestRow = `MIN(ts) AS ts, model, provider, api_key, request_id AS rid, TOTAL(failed = 0) AS successes, ${ATTEMPT_SUMS}`
   db.exec('DROP TABLE IF EXISTS temp.client_requests')
-  db.prepare(
-    `CREATE TEMP TABLE client_requests AS SELECT MIN(ts) AS ts, model, provider, api_key, ${ATTEMPT_SUMS}
-     FROM ${src} WHERE ${w.sql} GROUP BY ${REQUEST_KEY}`,
-  ).run(...w.params)
+  db.prepare(`CREATE TEMP TABLE client_requests AS SELECT ${requestRow} FROM ${valued(src, w)} GROUP BY ${REQUEST_KEY}`).run(...w.params)
+  const multi = (db.prepare('SELECT rid FROM client_requests WHERE successes > 1').all() as { rid: string }[]).map((r) => r.rid)
+  if (multi.length) {
+    db.exec('DELETE FROM client_requests WHERE successes > 1')
+    db.prepare(
+      `INSERT INTO client_requests SELECT ${requestRow}
+       FROM ${valued(src, { sql: `${w.sql} AND request_id IN (SELECT value FROM json_each(?))` }, `, ${TURN_KEY} AS rk`)} GROUP BY rk`,
+    ).run(...w.params, JSON.stringify(multi))
+  }
   try {
     const totals = {
       ...withTurnedAway(db.prepare(`SELECT ${METRICS} FROM client_requests`).get() as Metrics, turnedAway("''").get('')),
@@ -505,8 +518,8 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
           TOTAL(failed) AS failedAttempts, TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output,
           TOTAL(reasoning_tokens) AS reasoning, TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite,
           TOTAL(total_tokens) AS total, AVG(latency_ms) AS avgLatency, AVG(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS avgTtft,
-          TOTAL(${VALUE}) AS value, TOTAL(${UNPRICED}) AS unpricedTokens
-         FROM ${src} WHERE ${w.sql} GROUP BY 1 ORDER BY requests DESC LIMIT 50`,
+          TOTAL(v) AS value, TOTAL(CASE WHEN v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens
+         FROM ${valued(src, w)} GROUP BY 1 ORDER BY requests DESC LIMIT 50`,
       )
       .all(...w.params)
       .map((m) => withTurnedAway(m as Metrics))

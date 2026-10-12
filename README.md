@@ -36,7 +36,7 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
   </tr>
   <tr>
     <td><a href="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-dark.png" alt="Overview in dark mode"></a><br>Dark mode.</td>
-    <td><a href="docs/screenshots/overview-phone.png"><img src="docs/screenshots/overview-phone.png" alt="Overview on a phone" width="195"></a><br>On a phone.</td>
+    <td><a href="docs/screenshots/overview-phone.png"><img src="docs/screenshots/overview-phone.png" alt="Overview on a phone" width="260"></a><br>On a phone.</td>
   </tr>
 </table>
 

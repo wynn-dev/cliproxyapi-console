@@ -45,7 +45,7 @@ The console restarts CLIProxyAPI when it exits, and also when it is still runnin
 minute. The Overview page says when that happened.
 
 For an uptime monitor such as Uptime Kuma, use `GET /console/health` (for example `http://your-host:8320/console/health`).
-It needs no key and returns only states and times, never keys, paths or account names:
+It needs no key and returns only states, times, counts and the console version, never keys, paths or account names:
 
 - `200` with `"status": "ok"` when CLIProxyAPI is running and answered its last check (every 15 seconds).
 - `503` otherwise, with `status` saying why: `stopped` (stopped from the console), `starting`, `stopping`, `crashed`,
@@ -53,7 +53,7 @@ It needs no key and returns only states and times, never keys, paths or account 
 
 `usage.stale` turns `true` when request records have not been collected for 10 minutes while CLIProxyAPI runs.
 CLIProxyAPI drops records it holds for more than an hour, so act on it before then. In Uptime Kuma, an HTTP(s) monitor
-alerts on the status code; to also alert on stale usage, use an **HTTP(s) - Json Query** monitor with the query
+alerts on the status code (set retries to 1, so one slow check doesn't alert); to also alert on stale usage, use an **HTTP(s) - Json Query** monitor with the query
 `status = "ok" and usage.stale = false` and expected value `true`.
 
 ### Updating

@@ -9,11 +9,12 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { ApiError, download } from '@/lib/api'
-import { fmtMs, fmtNumber } from '@/lib/format'
+import { fmtMs, fmtNumber, fmtUsd } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { UsageRequest } from '@/lib/types'
 import { type CredentialLabels, CredentialName, ModelName, StatusLabel } from './cells'
+import { turnedAwayReason } from './search'
 
 function prettyError(body: string) {
   try {
@@ -67,13 +68,25 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
           {new Date(r.ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })}
         </SheetDescription>
         <div className="flex flex-wrap items-center gap-2 pt-2 text-sm">
-          <StatusLabel failed={!!r.failed} code={r.statusCode} />
-          <Badge variant="outline">{r.stream ? 'Stream' : 'Sync'}</Badge>
+          <StatusLabel failed={!!r.failed} code={r.statusCode} recovered={!!r.requestOk} turnedAway={!!r.turnedAway} />
+          {r.turnedAway ? <Badge variant="outline">Turned away</Badge> : null}
+          {!r.turnedAway && <Badge variant="outline">{r.stream ? 'Stream' : 'Sync'}</Badge>}
           {r.endpoint && <code className="font-mono text-xs text-muted-foreground">{r.endpoint}</code>}
         </div>
       </SheetHeader>
 
       <div className="flex-1 space-y-6 overflow-y-auto p-4">
+        {r.turnedAway ? (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{turnedAwayReason(r.reason)}.</span> CLIProxyAPI refused this request before
+            trying any account, so it used no tokens. It counts as a failed request.
+          </p>
+        ) : r.failed && r.requestOk ? (
+          <p className="text-sm text-muted-foreground">
+            This attempt failed, then the request succeeded on another attempt, so it counts as a successful request. The account
+            still shows this failure.
+          </p>
+        ) : null}
         <Section title="Request">
           <Field label="Request ID" wide>
             {r.requestId ? (
@@ -86,25 +99,33 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
             )}
           </Field>
           <Field label="Provider">{r.provider ? providerLabel(r.provider) : '—'}</Field>
-          <Field label="Auth type">{r.authType || '—'}</Field>
-          <Field label="Credential" wide>
-            <CredentialName authIndex={r.authIndex} labels={labels} />
-            {labels.has(r.authIndex) && <div className="font-mono text-xs text-muted-foreground">{r.authIndex}</div>}
-            {account && (
-              <Link
-                to="/credentials"
-                search={{ account: account.name }}
-                className="mt-1 inline-flex items-center gap-1 text-xs underline underline-offset-4 hover:text-foreground"
-              >
-                Open account <ArrowRightIcon className="size-3" />
-              </Link>
-            )}
-          </Field>
+          {!r.turnedAway && (
+            <>
+              <Field label="Auth type">{r.authType || '—'}</Field>
+              <Field label="Credential" wide>
+                <CredentialName authIndex={r.authIndex} labels={labels} />
+                {labels.has(r.authIndex) && <div className="font-mono text-xs text-muted-foreground">{r.authIndex}</div>}
+                {account && (
+                  <Link
+                    to="/credentials"
+                    search={{ account: account.name }}
+                    className="mt-1 inline-flex items-center gap-1 text-xs underline underline-offset-4 hover:text-foreground"
+                  >
+                    Open account <ArrowRightIcon className="size-3" />
+                  </Link>
+                )}
+              </Field>
+            </>
+          )}
           <Field label="Client key" wide>
             {r.apiKey ? <SecretText value={r.apiKey} className="-my-1.5" /> : '—'}
           </Field>
-          <Field label="Reasoning effort">{r.reasoningEffort || '—'}</Field>
-          <Field label="Service tier">{r.serviceTier || '—'}</Field>
+          {!r.turnedAway && (
+            <>
+              <Field label="Reasoning effort">{r.reasoningEffort || '—'}</Field>
+              <Field label="Service tier">{r.serviceTier || '—'}</Field>
+            </>
+          )}
           <Field label="Client IP">
             <span className="font-mono text-[13px]">{r.clientIp || '—'}</span>
           </Field>
@@ -112,26 +133,33 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
             <span className="tabular">{fmtMs(r.latencyMs)}</span>
             {r.stream && r.ttftMs > 0 ? <span className="text-muted-foreground tabular"> · TTFT {fmtMs(r.ttftMs)}</span> : null}
           </Field>
-          <Field label="User agent" wide>
-            <span className="font-mono text-xs break-all">{r.userAgent || '—'}</span>
-          </Field>
+          {!r.turnedAway && (
+            <Field label="User agent" wide>
+              <span className="font-mono text-xs break-all">{r.userAgent || '—'}</span>
+            </Field>
+          )}
         </Section>
 
-        <Section title="Tokens">
-          <Field label="Input">
-            {fmtNumber(r.input)}
-            {r.cached + r.cacheWrite > 0 && (
-              <span className="text-muted-foreground"> · {fmtNumber(Math.max(0, r.input - r.cached - r.cacheWrite))} uncached</span>
-            )}
-          </Field>
-          <Field label="Output">{fmtNumber(r.output)}</Field>
-          <Field label="Cache read">{fmtNumber(r.cached)}</Field>
-          <Field label="Cache write">{fmtNumber(r.cacheWrite)}</Field>
-          <Field label="Reasoning">{fmtNumber(r.reasoning)}</Field>
-          <Field label="Total">
-            <span className="font-medium">{fmtNumber(r.total)}</span>
-          </Field>
-        </Section>
+        {!r.turnedAway && (
+          <Section title="Tokens">
+            <Field label="Input">
+              {fmtNumber(r.input)}
+              {r.cached + r.cacheWrite > 0 && (
+                <span className="text-muted-foreground"> · {fmtNumber(Math.max(0, r.input - r.cached - r.cacheWrite))} uncached</span>
+              )}
+            </Field>
+            <Field label="Output">{fmtNumber(r.output)}</Field>
+            <Field label="Cache read">{fmtNumber(r.cached)}</Field>
+            <Field label="Cache write">{fmtNumber(r.cacheWrite)}</Field>
+            <Field label="Reasoning">{fmtNumber(r.reasoning)}</Field>
+            <Field label="Total">
+              <span className="font-medium">{fmtNumber(r.total)}</span>
+            </Field>
+            <Field label="Value at API prices" wide>
+              {r.value == null ? <span className="text-muted-foreground">No price for this model</span> : fmtUsd(r.value, true)}
+            </Field>
+          </Section>
+        )}
 
         {!!r.failed && (
           <div className="space-y-2">

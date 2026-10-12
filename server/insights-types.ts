@@ -106,9 +106,12 @@ export interface DigestAccount {
   peakWeekly?: number
   /** Times a window went down to its reserve. */
   reserveHits: number
+  /** Attempts served by this account, like the Usage page's credential stats. */
   requests: number
   failed: number
   tokens: number
+  /** USD at public API list prices (api-prices.ts). */
+  value: number
 }
 
 export interface DigestPool {
@@ -128,6 +131,11 @@ export interface DigestReport {
   pools: DigestPool[]
   accounts: DigestAccount[]
   cacheBreaks: Pick<CacheBreakReport, 'sessions' | 'breaks' | 'brokenSessions' | 'resent' | 'causes'>
+  /** Client requests, as Usage counts them: failover that ends in success is one success; turned-away ones count as failed. */
   requests: number
   failed: number
+  /** Requests CPA refused before trying any account, how many came while a pool was dry, and why (access-log.ts reasons). */
+  turnedAway: { total: number; whileDry: number; byReason: Record<string, number> }
+  /** USD at public API list prices, all traffic. */
+  value: number
 }

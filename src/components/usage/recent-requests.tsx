@@ -14,6 +14,7 @@ import type { UsageRequest } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { ClientKey, type CredentialLabels, CredentialName, ModelName, StatusLabel } from './cells'
 import { RequestSheet } from './request-sheet'
+import { turnedAwayReason } from './search'
 
 const PAGE = 50
 
@@ -38,8 +39,8 @@ export function RecentRequests({
         query: { ...filters, from: now - rangeMs, to: now + 60_000, limit: PAGE, before: pageParam },
       })
     },
-    initialPageParam: undefined as number | undefined,
-    getNextPageParam: (last) => (last.length === PAGE ? last.at(-1)!.id : undefined),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.length === PAGE ? `${last.at(-1)!.ts}:${last.at(-1)!.id}` : undefined),
     placeholderData: keepPreviousData,
     refetchInterval: (query) => ((query.state.data?.pages.length ?? 0) <= 1 ? 15_000 : false),
     enabled,
@@ -50,7 +51,9 @@ export function RecentRequests({
     <Card>
       <CardHeader>
         <CardTitle>Recent requests</CardTitle>
-        <CardDescription>Newest first. Select a request for details and its log.</CardDescription>
+        <CardDescription>
+          Newest first, one row per attempt. A grey failure was retried and succeeded. Select a request for details and its log.
+        </CardDescription>
       </CardHeader>
       <CardContent className={cn('transition-opacity', q.isPlaceholderData && 'opacity-60')}>
         {!q.data ? (
@@ -69,7 +72,7 @@ export function RecentRequests({
                   <TableHead>Time</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Credential</TableHead>
-                  <TableHead className="max-2xl:hidden">Client key</TableHead>
+                  <TableHead className="max-2xl:hidden" title="The client key, or the address when there is none">Client</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Latency</TableHead>
                   <TableHead className="text-right">Tokens in → out</TableHead>
@@ -91,14 +94,21 @@ export function RecentRequests({
                       <ModelName model={r.model} alias={r.alias} className="max-w-64" />
                     </TableCell>
                     <TableCell>
-                      <CredentialName authIndex={r.authIndex} labels={labels} provider={r.provider} hideProvider className="max-w-48" />
+                      {r.turnedAway ? (
+                        <span className="block max-w-48 truncate text-muted-foreground" title={r.error || undefined}>
+                          {turnedAwayReason(r.reason)}
+                        </span>
+                      ) : (
+                        <CredentialName authIndex={r.authIndex} labels={labels} provider={r.provider} hideProvider className="max-w-48" />
+                      )}
                     </TableCell>
                     <TableCell className="max-2xl:hidden">
-                      <ClientKey value={r.apiKey} />
+                      {r.apiKey ? <ClientKey value={r.apiKey} /> : <span className="font-mono text-[13px] text-muted-foreground">{r.clientIp || '—'}</span>}
                     </TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">
-                        <StatusLabel failed={!!r.failed} code={r.statusCode} />
+                        <StatusLabel failed={!!r.failed} code={r.statusCode} recovered={!!r.requestOk} turnedAway={!!r.turnedAway} />
+                        {r.turnedAway ? <Badge variant="outline" className="text-muted-foreground">Turned away</Badge> : null}
                         {r.stream ? <Badge variant="outline" className="text-muted-foreground">Stream</Badge> : null}
                       </span>
                     </TableCell>

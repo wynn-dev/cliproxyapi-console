@@ -1,4 +1,4 @@
-import { CircleCheckIcon, CircleXIcon } from 'lucide-react'
+import { BanIcon, CircleCheckIcon, CircleXIcon } from 'lucide-react'
 import { maskSecret } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
@@ -35,7 +35,27 @@ export function ClientKey({ value }: { value: string }) {
   return <code className="font-mono text-[13px]">{maskSecret(value)}</code>
 }
 
-export function StatusLabel({ failed, code }: { failed: boolean; code: number }) {
+/**
+ * An attempt's status. One that failed while its request succeeded on another attempt (failover)
+ * is muted: the client never saw it.
+ */
+export function StatusLabel({ failed, code, recovered, turnedAway }: { failed: boolean; code: number; recovered?: boolean; turnedAway?: boolean }) {
+  if (turnedAway) {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-medium">
+        <BanIcon className="size-3.5 text-warning" />
+        {code || 'Turned away'}
+      </span>
+    )
+  }
+  if (failed && recovered) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground" title="This attempt failed, then the request succeeded on another attempt">
+        <CircleXIcon className="size-3.5" />
+        {code || 'Failed'}
+      </span>
+    )
+  }
   return failed ? (
     <span className="inline-flex items-center gap-1.5 font-medium text-critical">
       <CircleXIcon className="size-3.5" />

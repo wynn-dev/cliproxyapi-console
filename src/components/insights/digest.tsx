@@ -3,7 +3,7 @@ import { CircleAlertIcon, CircleCheckIcon, InfoIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { fmtCompact, fmtDuration, fmtNumber, fmtWhen } from '@/lib/format'
+import { fmtCompact, fmtDuration, fmtNumber, fmtUsd, fmtWhen } from '@/lib/format'
 import { CAUSES, insightQueries, useAccountNames, type DigestReport } from '@/lib/insights'
 import { providerLabel } from '@/lib/providers'
 import { cn } from '@/lib/utils'
@@ -12,6 +12,15 @@ type Line = { tone: 'good' | 'warn' | 'info'; text: string }
 
 /** An account that never passed this share of its weekly limit had room to spare. */
 const UNDERUSED = 0.5
+
+/** Why CPA turned requests away (server/access-log.ts reasons), as a list item. */
+const TURNED_AWAY: Record<string, string> = {
+  cooldown: 'with every account cooling down',
+  no_account: 'with no account available',
+  unknown_model: 'for a model no account offers',
+  client_key: 'with a refused client key',
+  '': 'for other reasons',
+}
 
 const hours = (ms: number) => (ms < 3_600_000 ? fmtDuration(Math.round(ms / 60_000) * 60_000) : `${Math.round(ms / 3_600_000)}h`)
 
@@ -26,7 +35,15 @@ function lines(d: DigestReport, name: (n: string) => string): Line[] {
       out.push({ tone: 'warn', text: `${pool} was dry for ${hours(p.dryMs)}${longest}: every account at its reserve or limit.${advice}` })
     } else out.push({ tone: 'good', text: `${pool} never ran dry.` })
   }
-  // Requests turned away while the pool was dry belong here once usage records them (item 11).
+  const ta = d.turnedAway
+  if (ta.total) {
+    const reasons = Object.entries(ta.byReason)
+      .sort((a, b) => b[1] - a[1])
+      .map(([r, n]) => `${fmtNumber(n)} ${TURNED_AWAY[r] ?? TURNED_AWAY['']}`)
+      .join(', ')
+    const dry = ta.whileDry ? `, ${fmtNumber(ta.whileDry)} of them while a pool was dry` : ''
+    out.push({ tone: 'warn', text: `${fmtNumber(ta.total)} requests turned away${dry} (${reasons}).` })
+  }
   for (const a of d.accounts) {
     if (a.peakWeekly === undefined) out.push({ tone: 'info', text: `${name(a.name)} wasn't used this week.` })
     else if (a.peakWeekly < UNDERUSED) out.push({ tone: 'info', text: `${name(a.name)} never passed ${Math.round(a.peakWeekly * 100)}% of its weekly limit.` })
@@ -41,6 +58,11 @@ function lines(d: DigestReport, name: (n: string) => string): Line[] {
   } else if (c.sessions) out.push({ tone: 'good', text: `No conversation lost its prompt cache (${fmtNumber(c.sessions)} conversations).` })
   if (d.requests) {
     out.push({ tone: d.failed / d.requests > 0.05 ? 'warn' : 'info', text: `${fmtNumber(d.requests)} requests, ${d.failed ? `${fmtNumber(d.failed)} failed` : 'none failed'}.` })
+  }
+  if (d.value > 0) {
+    const top = d.accounts.reduce((a, b) => (b.value > a.value ? b : a))
+    const most = d.accounts.length > 1 && top.value > 0 ? `, most by ${name(top.name)} (${fmtUsd(top.value)})` : ''
+    out.push({ tone: 'info', text: `The pool served ${fmtUsd(d.value)} of usage at API prices${most}.` })
   }
   return out
 }
@@ -90,15 +112,19 @@ export function DigestCard() {
 }
 
 function AccountTable({ data, name }: { data: DigestReport; name: (n: string) => string }) {
-  // Value at API prices per account goes in a column here once usage.ts prices requests (item 12).
   return (
     <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full min-w-[34rem] text-sm">
+      <table className="w-full min-w-[38rem] text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">
             <th className="px-3 py-2 text-left font-medium">Account</th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Requests</th>
+            <th className="px-3 py-2 text-right font-medium whitespace-nowrap" title="Every attempt, so a request that failed over counts on each account it tried">
+              Attempts
+            </th>
             <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Tokens</th>
+            <th className="px-3 py-2 text-right font-medium whitespace-nowrap" title="At public API prices">
+              Value
+            </th>
             <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Peak weekly use</th>
             <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Reached reserve</th>
           </tr>
@@ -119,6 +145,7 @@ function AccountTable({ data, name }: { data: DigestReport; name: (n: string) =>
                 {a.failed > 0 && <span className="text-xs text-muted-foreground"> · {fmtNumber(a.failed)} failed</span>}
               </td>
               <td className="px-3 py-2 text-right whitespace-nowrap tabular">{fmtCompact(a.tokens)}</td>
+              <td className="px-3 py-2 text-right whitespace-nowrap tabular">{a.value ? fmtUsd(a.value) : '—'}</td>
               <td className="px-3 py-2 text-right whitespace-nowrap tabular">{a.peakWeekly === undefined ? '—' : `${Math.round(a.peakWeekly * 100)}%`}</td>
               <td className="px-3 py-2 text-right whitespace-nowrap tabular">{a.reserveHits ? `${a.reserveHits}×` : '—'}</td>
             </tr>

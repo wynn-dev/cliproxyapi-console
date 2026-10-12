@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
+import { LONG_CONTEXT_STEPS, apiValue } from './api-prices.ts'
 import { keyMatchesConfig } from './auth.ts'
 import { env, paths } from './env.ts'
 import { readState } from './state.ts'
@@ -16,6 +17,7 @@ export const db = new DatabaseSync(paths.usageDb)
 fs.chmodSync(paths.usageDb, 0o600)
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA temp_store = MEMORY;
   CREATE TABLE IF NOT EXISTS requests (
     id INTEGER PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -64,6 +66,32 @@ const ADDED_COLUMNS: Record<string, string> = {
 const columns = new Set((db.prepare('PRAGMA table_info(requests)').all() as { name: string }[]).map((c) => c.name))
 for (const [col, type] of Object.entries(ADDED_COLUMNS)) if (!columns.has(col)) db.exec(`ALTER TABLE requests ADD COLUMN ${col} ${type}`)
 db.exec("CREATE INDEX IF NOT EXISTS requests_session ON requests (session_id, ts) WHERE session_id != ''")
+db.exec('CREATE INDEX IF NOT EXISTS requests_request_id ON requests (request_id)')
+
+/**
+ * Client requests CPA turned away before any account served them: every account cooling down or
+ * held back, a model no available account serves, a client key it does not accept. CPA writes no
+ * usage record for those, only an access log line, which access-log.ts reads. request_id is the
+ * log's short id, the last 8 characters of the request_id usage records carry.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS turned_away (
+    id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    request_id TEXT NOT NULL,
+    status_code INTEGER NOT NULL,
+    endpoint TEXT NOT NULL DEFAULT '',
+    latency_ms INTEGER NOT NULL DEFAULT 0,
+    client_ip TEXT NOT NULL DEFAULT '',
+    api_key TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    UNIQUE (request_id, ts)
+  );
+  CREATE INDEX IF NOT EXISTS turned_away_ts ON turned_away (ts);
+`)
 
 /*
  * Version 1 gives token counts one meaning across providers (see tokenCounts). Rows stored before
@@ -288,7 +316,9 @@ async function drain() {
 }
 
 function prune() {
-  db.prepare('DELETE FROM requests WHERE ts < ?').run(Date.now() - env.usageRetentionDays * 86_400_000)
+  const cutoff = Date.now() - env.usageRetentionDays * 86_400_000
+  db.prepare('DELETE FROM requests WHERE ts < ?').run(cutoff)
+  db.prepare('DELETE FROM turned_away WHERE ts < ?').run(cutoff)
 }
 
 export function startCollector() {
@@ -304,6 +334,13 @@ export function startCollector() {
 
 // ---------------------------------------------------------------------------------------------
 // Queries
+//
+// Each upstream attempt of a client request (a retry, failover to another account) is its own record,
+// and they share the request's request_id. Request counts and success rates count client requests: one
+// failed only if every attempt did, so failover that ends well is a success. Per credential stats count
+// attempts instead, so an account still shows the attempt that failed on it. Tokens, value and latency
+// are summed or averaged over attempts. Turned-away requests are failed client requests with no tokens
+// and no credential.
 
 export interface UsageFilter {
   from: number
@@ -312,98 +349,265 @@ export interface UsageFilter {
   provider?: string
   authIndex?: string
   apiKey?: string
-  status?: 'ok' | 'failed'
+  status?: 'ok' | 'failed' | 'turned_away'
 }
 
-function where(f: UsageFilter) {
+/** The client request an attempt belongs to (see TURN_KEY for ids with several successes). */
+const REQUEST_KEY = "COALESCE(NULLIF(request_id, ''), '#' || id)"
+/**
+ * A Codex websocket session keeps one request_id for all its turns, so there a success ends a
+ * request and the next attempt with that id starts a new one. Sorting every attempt for this costs
+ * as much as the rest of the summary, so it is only done for ids with more than one success.
+ */
+const TURN_KEY = `request_id || ':' || TOTAL(failed = 0) OVER (PARTITION BY request_id ORDER BY ts, id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)`
+/** Whether an attempt's client request succeeded in the end: with this attempt or the next success with its id. */
+const REQUEST_OK = `(failed = 0 OR (request_id != '' AND EXISTS (SELECT 1 FROM requests o WHERE o.request_id = requests.request_id
+  AND o.failed = 0 AND (o.ts > requests.ts OR (o.ts = requests.ts AND o.id > requests.id)))))`
+
+function filterSql(f: UsageFilter, extra: (string | false)[]) {
   const clauses = ['ts >= ?', 'ts < ?']
   const params: SQLInputValue[] = [f.from, f.to]
-  const eq = (col: string, v?: string) => {
-    if (v !== undefined && v !== '') {
+  for (const [col, v] of [['model', f.model], ['provider', f.provider], ['api_key', f.apiKey]] as const) {
+    if (v) {
       clauses.push(`${col} = ?`)
       params.push(v)
     }
   }
-  eq('model', f.model)
-  eq('provider', f.provider)
-  eq('auth_index', f.authIndex)
-  eq('api_key', f.apiKey)
-  if (f.status) clauses.push(f.status === 'failed' ? 'failed = 1' : 'failed = 0')
+  for (const c of extra) if (c) clauses.push(c)
   return { sql: clauses.join(' AND '), params }
 }
 
+function where(f: UsageFilter) {
+  const w = filterSql(f, [f.status === 'ok' && REQUEST_OK, f.status === 'failed' && `NOT ${REQUEST_OK}`, f.status === 'turned_away' && '0'])
+  if (f.authIndex) {
+    w.sql += ' AND auth_index = ?'
+    w.params.push(f.authIndex)
+  }
+  return w
+}
+
+/**
+ * Reading most of the table through the ts index is many times slower than scanning all of it, so
+ * wide ranges scan. Counting the rows in range only reads the index, which is cheap.
+ */
+function source(from: number, to: number) {
+  const { rows, inRange } = db
+    .prepare('SELECT (SELECT COUNT(*) FROM requests) AS rows, (SELECT COUNT(*) FROM requests WHERE ts >= ? AND ts < ?) AS inRange')
+    .get(from, to) as { rows: number; inRange: number }
+  return inRange * 10 > rows ? 'requests NOT INDEXED' : 'requests'
+}
+
+/** The same filter for turned-away requests, which never reached a credential or succeeded. */
+const whereTurnedAway = (f: UsageFilter) => filterSql(f, [(!!f.authIndex || f.status === 'ok') && '0'])
+
+// API-price value of an attempt, or NULL without a price, for SQL: node:sqlite calls back into JS per row.
+db.function('api_value', { deterministic: true }, (model, tier, uncached, cacheRead, cacheWrite, output, input) => {
+  const band = LONG_CONTEXT_STEPS.filter((n) => Number(input) > n).length
+  const tokens = { uncached: Number(uncached), cacheRead: Number(cacheRead), cacheWrite: Number(cacheWrite), output: Number(output) }
+  return apiValue(String(model), String(tier), tokens, band) ?? null
+})
+const PRICE_MODEL = "COALESCE(NULLIF(response_model, ''), model)"
+const PRICE_TIER = "COALESCE(NULLIF(response_service_tier, ''), service_tier)"
+const VALUE = `api_value(${PRICE_MODEL}, ${PRICE_TIER},
+  MAX(input_tokens - cached_tokens - cache_write_tokens, 0), cached_tokens, cache_write_tokens, output_tokens, input_tokens)`
+/**
+ * Attempts in the filter with their value as `v`. LIMIT keeps SQLite from inlining the subquery,
+ * which would call api_value once for each use of `v`.
+ */
+const valued = (src: string, w: { sql: string }, extra = '') => `(SELECT *, ${VALUE} AS v${extra} FROM ${src} WHERE ${w.sql} LIMIT -1)`
+
+/** Sums over attempts, for one client request or one credential. */
+const ATTEMPT_SUMS = `
+  COUNT(*) AS attempts, TOTAL(failed) AS failedAttempts,
+  TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output, TOTAL(reasoning_tokens) AS reasoning,
+  TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite, TOTAL(total_tokens) AS total,
+  TOTAL(latency_ms) AS latency, TOTAL(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS ttft,
+  TOTAL(stream = 1 AND ttft_ms > 0) AS ttftCount, TOTAL(v) AS value, TOTAL(CASE WHEN v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens`
+
+/**
+ * Metrics from rows of ATTEMPT_SUMS. With one row per client request, a request failed when all its
+ * attempts did; with one row per attempt (credentials) that is just the attempt failing.
+ */
 const METRICS = `
   COUNT(*) AS requests,
-  TOTAL(failed) AS failed,
-  TOTAL(input_tokens) AS input,
-  TOTAL(output_tokens) AS output,
-  TOTAL(reasoning_tokens) AS reasoning,
-  TOTAL(cached_tokens) AS cached,
-  TOTAL(cache_write_tokens) AS cacheWrite,
-  TOTAL(total_tokens) AS total,
-  AVG(latency_ms) AS avgLatency,
-  AVG(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS avgTtft`
+  TOTAL(failedAttempts = attempts) AS failed,
+  TOTAL(failedAttempts > 0 AND failedAttempts < attempts) AS recovered,
+  TOTAL(attempts) AS attempts,
+  TOTAL(failedAttempts) AS failedAttempts,
+  TOTAL(input) AS input,
+  TOTAL(output) AS output,
+  TOTAL(reasoning) AS reasoning,
+  TOTAL(cached) AS cached,
+  TOTAL(cacheWrite) AS cacheWrite,
+  TOTAL(total) AS total,
+  TOTAL(latency) / TOTAL(attempts) AS avgLatency,
+  TOTAL(ttft) / TOTAL(ttftCount) AS avgTtft,
+  TOTAL(value) AS value,
+  TOTAL(unpricedTokens) AS unpricedTokens`
+
+/** A row of METRICS; `key` in breakdowns. */
+export interface Metrics {
+  key?: string
+  requests: number
+  failed: number
+  recovered: number
+  attempts: number
+  failedAttempts: number
+  input: number
+  output: number
+  reasoning: number
+  cached: number
+  cacheWrite: number
+  total: number
+  avgLatency: number | null
+  avgTtft: number | null
+  value: number
+  unpricedTokens: number
+}
 
 const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_000, 86_400_000]
 
 export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
   const w = where(f)
+  const ta = whereTurnedAway(f)
+  const src = source(f.from, f.to)
   const bucket = BUCKETS.find((b) => (f.to - f.from) / b <= 120) ?? 86_400_000
   const shift = -tzOffsetMin * 60_000 // align day buckets to the viewer's local midnight
-  const totals = db.prepare(`SELECT ${METRICS} FROM requests WHERE ${w.sql}`).get(...w.params)
-  const rows = db
-    .prepare(
-      `SELECT ((ts + ?) / ?) * ? - ? AS t, COUNT(*) AS requests, SUM(failed) AS failed,
-        SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cached_tokens) AS cached,
-        SUM(cache_write_tokens) AS cacheWrite, SUM(total_tokens) AS total, AVG(latency_ms) AS avgLatency
-       FROM requests WHERE ${w.sql} GROUP BY t ORDER BY t`,
+  const turnedAway = (col: string) =>
+    new Map(
+      (db.prepare(`SELECT ${col} AS key, COUNT(*) AS n FROM turned_away WHERE ${ta.sql} GROUP BY 1`).all(...ta.params) as { key: string | number; n: number }[]).map(
+        (r) => [r.key, r.n],
+      ),
     )
-    // node:sqlite binds JS numbers as REAL; BigInt keeps the bucket math in integer division.
-    .all(BigInt(shift), BigInt(bucket), BigInt(bucket), BigInt(shift), ...w.params) as { t: number }[]
-  const byT = new Map(rows.map((r) => [r.t, r]))
-  const series = []
-  const start = Math.floor((f.from + shift) / bucket) * bucket - shift
-  for (let t = start; t < f.to; t += bucket) {
-    series.push(byT.get(t) ?? { t, requests: 0, failed: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0, avgLatency: null })
+  const withTurnedAway = <M extends { requests: number; failed: number }>(m: M, n = 0) => ({ ...m, requests: m.requests + n, failed: m.failed + n, turnedAway: n })
+
+  // One row per client request, built once. Bare columns come from its first attempt (SQLite takes
+  // them from the MIN(ts) row), so a request belongs to the model, provider and key it started with.
+  const requestRow = `MIN(ts) AS ts, model, provider, api_key, request_id AS rid, TOTAL(failed = 0) AS successes, ${ATTEMPT_SUMS}`
+  db.exec('DROP TABLE IF EXISTS temp.client_requests')
+  db.prepare(`CREATE TEMP TABLE client_requests AS SELECT ${requestRow} FROM ${valued(src, w)} GROUP BY ${REQUEST_KEY}`).run(...w.params)
+  const multi = (db.prepare('SELECT rid FROM client_requests WHERE successes > 1').all() as { rid: string }[]).map((r) => r.rid)
+  if (multi.length) {
+    db.exec('DELETE FROM client_requests WHERE successes > 1')
+    db.prepare(
+      `INSERT INTO client_requests SELECT ${requestRow}
+       FROM ${valued(src, { sql: `${w.sql} AND request_id IN (SELECT value FROM json_each(?))` }, `, ${TURN_KEY} AS rk`)} GROUP BY rk`,
+    ).run(...w.params, JSON.stringify(multi))
   }
-  const group = (col: string) =>
-    db.prepare(`SELECT ${col} AS key, ${METRICS} FROM requests WHERE ${w.sql} GROUP BY ${col} ORDER BY requests DESC LIMIT 50`).all(...w.params)
-  return {
-    bucketMs: bucket,
-    totals,
-    series,
-    byModel: group('model'),
-    byProvider: group('provider'),
-    byCredential: group('auth_index'),
-    byApiKey: group('api_key'),
+  try {
+    const totals = {
+      ...withTurnedAway(db.prepare(`SELECT ${METRICS} FROM client_requests`).get() as unknown as Metrics, turnedAway("''").get('')),
+      unpricedModels: (db.prepare('SELECT DISTINCT model FROM client_requests WHERE unpricedTokens > 0 ORDER BY 1').all() as { model: string }[]).map((r) => r.model),
+    }
+
+    const rows = db
+      .prepare(
+        `SELECT ((ts + ?) / ?) * ? - ? AS t, COUNT(*) AS requests, TOTAL(failedAttempts = attempts) AS failed, TOTAL(input) AS input,
+          TOTAL(output) AS output, TOTAL(cached) AS cached, TOTAL(cacheWrite) AS cacheWrite, TOTAL(total) AS total,
+          TOTAL(latency) / TOTAL(attempts) AS avgLatency
+         FROM client_requests GROUP BY t ORDER BY t`,
+      )
+      // node:sqlite binds JS numbers as REAL; BigInt keeps the bucket math in integer division.
+      .all(BigInt(shift), BigInt(bucket), BigInt(bucket), BigInt(shift)) as { t: number; requests: number; failed: number }[]
+    const byT = new Map(rows.map((r) => [r.t, r]))
+    const awayByT = turnedAway(`((ts + ${shift}) / ${bucket}) * ${bucket} - ${shift}`)
+    const series = []
+    const start = Math.floor((f.from + shift) / bucket) * bucket - shift
+    for (let t = start; t < f.to; t += bucket) {
+      const p = byT.get(t) ?? { t, requests: 0, failed: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0, avgLatency: null }
+      series.push(withTurnedAway(p, awayByT.get(t)))
+    }
+
+    const group = (col: string) => {
+      const metrics = db.prepare(`SELECT ${col} AS key, ${METRICS} FROM client_requests GROUP BY 1 ORDER BY requests DESC LIMIT 50`).all() as unknown as (Metrics & { key: string })[]
+      const away = turnedAway(col)
+      const out = metrics.map((m) => withTurnedAway(m, away.get(m.key)))
+      for (const [key, n] of away) if (!metrics.some((m) => m.key === key)) out.push(withTurnedAway({ key: String(key), ...EMPTY }, n))
+      return out.sort((a, b) => b.requests - a.requests)
+    }
+    // Attempts, so an account shows the attempts that failed on it. Turned-away requests never reached one.
+    const credentials = db
+      .prepare(
+        `SELECT auth_index AS key, COUNT(*) AS requests, TOTAL(failed) AS failed, 0 AS recovered, COUNT(*) AS attempts,
+          TOTAL(failed) AS failedAttempts, TOTAL(input_tokens) AS input, TOTAL(output_tokens) AS output,
+          TOTAL(reasoning_tokens) AS reasoning, TOTAL(cached_tokens) AS cached, TOTAL(cache_write_tokens) AS cacheWrite,
+          TOTAL(total_tokens) AS total, AVG(latency_ms) AS avgLatency, AVG(CASE WHEN stream = 1 AND ttft_ms > 0 THEN ttft_ms END) AS avgTtft,
+          TOTAL(v) AS value, TOTAL(CASE WHEN v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens
+         FROM ${valued(src, w)} GROUP BY 1 ORDER BY requests DESC LIMIT 50`,
+      )
+      .all(...w.params) as unknown as (Metrics & { key: string })[]
+    const byCredential = credentials.map((m) => withTurnedAway(m))
+    return { bucketMs: bucket, totals, series, byModel: group('model'), byProvider: group('provider'), byCredential, byApiKey: group('api_key') }
+  } finally {
+    db.exec('DROP TABLE temp.client_requests')
   }
 }
 
-export function usageRequests(f: UsageFilter, limit: number, beforeId?: number) {
+const EMPTY = {
+  requests: 0, failed: 0, recovered: 0, attempts: 0, failedAttempts: 0, input: 0, output: 0, reasoning: 0,
+  cached: 0, cacheWrite: 0, total: 0, avgLatency: null, avgTtft: null, value: 0, unpricedTokens: 0,
+}
+
+/** Newest first. Attempts and turned-away requests (negative ids) share one list, paged by (ts, id). */
+export function usageRequests(f: UsageFilter, limit: number, before?: { ts: number; id: number }) {
   const w = where(f)
-  if (beforeId) {
-    w.sql += ' AND id < ?'
-    w.params.push(beforeId)
+  const ta = whereTurnedAway(f)
+  if (before) {
+    w.sql += ' AND (ts < ? OR (ts = ? AND id < ?))'
+    w.params.push(before.ts, before.ts, before.id)
+    ta.sql += ' AND (ts < ? OR (ts = ? AND -id < ?))'
+    ta.params.push(before.ts, before.ts, before.id)
   }
-  return db
+  const rows = db
     .prepare(
       `SELECT id, ts, request_id AS requestId, model, alias, provider, endpoint, auth_index AS authIndex,
         auth_type AS authType, api_key AS apiKey, failed, status_code AS statusCode, stream, latency_ms AS latencyMs,
         ttft_ms AS ttftMs, input_tokens AS input, output_tokens AS output, reasoning_tokens AS reasoning,
         cached_tokens AS cached, cache_write_tokens AS cacheWrite, total_tokens AS total,
         reasoning_effort AS reasoningEffort, service_tier AS serviceTier, client_ip AS clientIp,
-        user_agent AS userAgent, error
-       FROM requests WHERE ${w.sql} ORDER BY id DESC LIMIT ?`,
+        user_agent AS userAgent, error, ${REQUEST_OK} AS requestOk, 0 AS turnedAway, '' AS reason,
+        response_model AS responseModel, response_service_tier AS responseServiceTier
+       FROM requests WHERE ${w.sql}
+       UNION ALL
+       SELECT -id, ts, request_id, model, '', provider, endpoint, '', '', api_key, 1, status_code, 0, latency_ms,
+        0, 0, 0, 0, 0, 0, 0, '', '', client_ip, '', error, 0, 1, reason, '', ''
+       FROM turned_away WHERE ${ta.sql}
+       ORDER BY ts DESC, id DESC LIMIT ?`,
     )
-    .all(...w.params, limit)
+    .all(...w.params, ...ta.params, limit) as unknown as ({
+      model: string
+      responseModel: string
+      serviceTier: string
+      responseServiceTier: string
+      input: number
+      cached: number
+      cacheWrite: number
+      output: number
+      turnedAway: number
+    } & Record<string, unknown>)[]
+  return rows.map((r) => {
+    const model = r.responseModel || r.model
+    const band = LONG_CONTEXT_STEPS.filter((n) => r.input > n).length
+    const tokens = { uncached: Math.max(0, r.input - r.cached - r.cacheWrite), cacheRead: r.cached, cacheWrite: r.cacheWrite, output: r.output }
+    return { ...r, value: r.turnedAway ? null : (apiValue(model, r.responseServiceTier || r.serviceTier, tokens, band) ?? null) }
+  })
 }
 
 export function usageFacets(from: number, to: number) {
-  const distinct = (col: string) =>
-    (db.prepare(`SELECT DISTINCT ${col} AS v FROM requests WHERE ts >= ? AND ts < ? AND ${col} != '' ORDER BY v`).all(from, to) as { v: string }[]).map((r) => r.v)
-  return { models: distinct('model'), providers: distinct('provider'), credentials: distinct('auth_index'), apiKeys: distinct('api_key') }
+  const src = source(from, to)
+  const distinct = (col: string, turnedAway = true) =>
+    (
+      db
+        .prepare(
+          `SELECT DISTINCT ${col} AS v FROM ${src} WHERE ts >= ? AND ts < ? AND ${col} != ''` +
+            (turnedAway ? ` UNION SELECT ${col} FROM turned_away WHERE ts >= ? AND ts < ? AND ${col} != ''` : '') +
+            ' ORDER BY v',
+        )
+        .all(from, to, ...(turnedAway ? [from, to] : [])) as { v: string }[]
+    ).map((r) => r.v)
+  return { models: distinct('model'), providers: distinct('provider'), credentials: distinct('auth_index', false), apiKeys: distinct('api_key') }
 }
 
 export function clearUsage() {
-  db.exec('DELETE FROM requests')
+  db.exec('DELETE FROM requests; DELETE FROM turned_away')
 }

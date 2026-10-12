@@ -106,7 +106,7 @@ export interface UsageParams {
   provider?: string
   authIndex?: string
   apiKey?: string
-  status?: 'ok' | 'failed'
+  status?: 'ok' | 'failed' | 'turned_away'
 }
 
 export const usageQueries = {

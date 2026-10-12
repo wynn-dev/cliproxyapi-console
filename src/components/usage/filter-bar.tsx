@@ -41,7 +41,8 @@ function useOptions(facets: UsageFacets | undefined, labels: CredentialLabels): 
     })),
     status: [
       { value: 'ok', text: 'Succeeded', label: 'Succeeded' },
-      { value: 'failed', text: 'Failed', label: 'Failed' },
+      { value: 'failed', text: 'Failed', label: 'Failed', hint: 'Incl. turned away' },
+      { value: 'turned_away', text: 'Turned away', label: 'Turned away' },
     ],
   }
 }

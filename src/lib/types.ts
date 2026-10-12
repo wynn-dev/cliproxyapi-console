@@ -43,7 +43,8 @@ export interface ConsoleStatus {
   /** Whether the console runs as a background service, and the command that installs it as one. */
   service: boolean
   serviceCommand: string
-  collector: { lastPollAt: number | null; lastError: string | null }
+  /** accessLogError: why turned-away requests are not being read from CPA's log. */
+  collector: { lastPollAt: number | null; lastError: string | null; accessLogError: string | null }
 }
 
 export interface ReleaseInfo {
@@ -63,10 +64,19 @@ export interface OutputLine {
 /**
  * Token counts mean the same for every provider: input is every prompt token, cache reads (cached)
  * and writes (cacheWrite) included; output includes reasoning; total is input + output.
+ *
+ * requests and failed count client requests: one that failed over to another account and then
+ * succeeded is one success. Turned-away requests are included in both. attempts counts every
+ * upstream attempt; per credential rows count attempts as requests.
  */
 export interface UsageMetrics {
   requests: number
   failed: number
+  /** Client requests that succeeded after a failed attempt. */
+  recovered: number
+  turnedAway: number
+  attempts: number
+  failedAttempts: number
   input: number
   output: number
   reasoning: number
@@ -75,12 +85,17 @@ export interface UsageMetrics {
   total: number
   avgLatency: number | null
   avgTtft: number | null
+  /** USD at public API list prices (server/api-prices.ts). */
+  value: number
+  /** Tokens of models with no list price, left out of value. */
+  unpricedTokens: number
 }
 
 export interface UsagePoint {
   t: number
   requests: number
   failed: number
+  turnedAway: number
   input: number
   output: number
   cached: number
@@ -91,7 +106,7 @@ export interface UsagePoint {
 
 export interface UsageSummary {
   bucketMs: number
-  totals: UsageMetrics
+  totals: UsageMetrics & { unpricedModels: string[] }
   series: UsagePoint[]
   byModel: (UsageMetrics & { key: string })[]
   byProvider: (UsageMetrics & { key: string })[]
@@ -99,9 +114,14 @@ export interface UsageSummary {
   byApiKey: (UsageMetrics & { key: string })[]
 }
 
+/** A turned-away reason, as the server's access-log.ts classifies it. */
+export type TurnedAwayReason = 'cooldown' | 'no_account' | 'unknown_model' | 'client_key' | ''
+
+/** An upstream attempt, or a turned-away request (turnedAway 1, negative id, no credential or tokens). */
 export interface UsageRequest {
   id: number
   ts: number
+  /** For turned-away requests, the short id from CPA's log (the last 8 characters). */
   requestId: string | null
   model: string
   alias: string
@@ -111,6 +131,10 @@ export interface UsageRequest {
   authType: string
   apiKey: string
   failed: 0 | 1
+  /** The client request succeeded in the end, on this attempt or another. */
+  requestOk: 0 | 1
+  turnedAway: 0 | 1
+  reason: TurnedAwayReason
   statusCode: number
   stream: 0 | 1
   latencyMs: number
@@ -123,9 +147,13 @@ export interface UsageRequest {
   total: number
   reasoningEffort: string
   serviceTier: string
+  responseModel: string
+  responseServiceTier: string
   clientIp: string
   userAgent: string
   error: string
+  /** USD at public API list prices; null without a price. */
+  value: number | null
 }
 
 export interface UsageFacets {

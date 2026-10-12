@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { fmtDuration } from '@/lib/format'
 import { queries } from '@/lib/queries'
 import type { Cooldown, Credential } from '@/lib/types'
-import { STATE_META, cooldownLabel, cooldownUntil, credState, holdLabel, reserveHold, reserveNote, useTicker } from './lib'
+import { STATE_META, cooldownLabel, cooldownUntil, credState, holdLabel, reserveHold, reserveNote, signInWarning, useTicker, warningLabel, warningNote } from './lib'
 
 /** Live "4m 12s" countdown to a timestamp. */
 export function Countdown({ until, endLabel = 'retrying' }: { until: number; endLabel?: string }) {
@@ -41,14 +41,16 @@ export function CredentialStatus({ credential: c }: { credential: Credential }) 
 
   const label = (
     <span className="inline-flex items-center gap-2">
-      <StatusDot tone={meta.tone} />
+      <StatusDot tone={hold?.reason === 'signed-out' ? 'bad' : meta.tone} />
       <span>
         {reserved ? holdLabel(hold) : state === 'cooling' && onlyModels ? `${cooldowns.length} model${cooldowns.length > 1 ? 's' : ''} cooling` : meta.label}
       </span>
-      {until && (
+      {until ? (
         <span className="text-xs text-muted-foreground">
           <Countdown until={until} endLabel={reserved ? 'resuming' : undefined} />
         </span>
+      ) : (
+        hold?.reason === 'signed-out' && <span className="text-xs text-muted-foreground">· sign in again</span>
       )}
     </span>
   )
@@ -62,14 +64,38 @@ export function CredentialStatus({ credential: c }: { credential: Credential }) 
       <CooldownTooltipBody cooldowns={cooldowns} />
     ) : null
 
-  if (!tip) return label
-  return (
+  const status = !tip ? (
+    label
+  ) : (
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="cursor-default">{label}</span>
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start">
         {tip}
+      </TooltipContent>
+    </Tooltip>
+  )
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-1.5">
+      {status}
+      <SignInHint credential={c} />
+    </span>
+  )
+}
+
+/** "· May be signed out" on an account the console leaves on, with why in a tooltip. */
+export function SignInHint({ credential: c }: { credential: Credential }) {
+  const reserve = useQuery(queries.reserve()).data
+  const w = signInWarning(c, reserve)
+  if (!w) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-default text-xs text-warning">· {warningLabel(w).toLowerCase()}</span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start">
+        <span className="block max-w-xs whitespace-normal">{warningNote(w)}</span>
       </TooltipContent>
     </Tooltip>
   )

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { BoxesIcon, ChevronRightIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
+import { AlertTriangleIcon, BoxesIcon, ChevronRightIcon, DownloadIcon, LogInIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CopyButton, StatusDot } from '@/components/common'
@@ -24,9 +24,14 @@ import { accountReadings } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { Credential, OrderPlacement, OrderStatus } from '@/lib/types'
+import { SignInAgainDialog } from './add-credential-dialog'
 import {
   STATE_META,
   accountName,
+  canSignIn,
+  signInWarning,
+  warningLabel,
+  warningNote,
   cooldownLabel,
   cooldownUntil,
   credState,
@@ -90,8 +95,11 @@ function SheetBody({
   const refresh = useRefreshCredentials()
   const reset = useResetCooldown()
   const del = useDeleteCredentials()
+  const [signingIn, setSigningIn] = useState(false)
   const reserve = useQuery(queries.reserve()).data
   const hold = reserveHold(c, reserve)
+  const signedOut = hold?.reason === 'signed-out'
+  const warning = signInWarning(c, reserve)
   const state = credState(c)
   const meta = STATE_META[state]
   const cooling = state === 'cooling' || (c.cooldowns?.length ?? 0) > 0
@@ -124,7 +132,7 @@ function SheetBody({
           <Badge variant="secondary">{providerLabel(c.provider)}</Badge>
           {c.id_token?.plan_type && <Badge variant="outline" className="capitalize">{c.id_token.plan_type}</Badge>}
           <Badge variant="outline" className="gap-1.5">
-            <StatusDot tone={meta.tone} />
+            <StatusDot tone={signedOut ? 'bad' : meta.tone} />
             {hold && !hold.overridden ? holdLabel(hold) : meta.label}
           </Badge>
         </div>
@@ -137,10 +145,19 @@ function SheetBody({
             />
             Enabled
           </label>
-          <Button variant="outline" size="sm" disabled={refresh.isPending} onClick={() => refresh.mutate([c.name])}>
-            {refresh.isPending ? <Spinner /> : <RefreshCwIcon />}
-            Refresh token
-          </Button>
+          {/* A token refresh cannot help once the provider rejects the sign-in itself. */}
+          {canSignIn(c) && (signedOut || warning || state === 'error') ? (
+            <Button variant={signedOut ? 'default' : 'outline'} size="sm" onClick={() => setSigningIn(true)}>
+              <LogInIcon />
+              Sign in again
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled={refresh.isPending} onClick={() => refresh.mutate([c.name])}>
+              {refresh.isPending ? <Spinner /> : <RefreshCwIcon />}
+              Refresh token
+            </Button>
+          )}
+          <SignInAgainDialog account={signingIn ? c : null} onOpenChange={setSigningIn} />
           <Button variant="outline" size="sm" onClick={() => onShowModels(c)}>
             <BoxesIcon />
             Models
@@ -181,14 +198,18 @@ function SheetBody({
       </SheetHeader>
 
       <div className="flex-1 overflow-y-auto">
-        {(state === 'error' || cooling || c.status_message || hold) && (
+        {(state === 'error' || cooling || c.status_message || hold || warning) && (
           <Section title="Status">
             {hold && reserve && (
-              <Alert>
+              <Alert variant={signedOut ? 'destructive' : 'default'}>
                 <ShieldIcon />
                 <AlertTitle>
-                  {hold.overridden ? (
+                  {hold.released ? (
+                    'Released · every account was held back'
+                  ) : hold.overridden ? (
                     'Reserve overridden'
+                  ) : signedOut ? (
+                    'Needs sign-in'
                   ) : (
                     <>
                       {holdLabel(hold)} · back in <Countdown until={hold.until} endLabel="a moment" />
@@ -196,6 +217,15 @@ function SheetBody({
                   )}
                 </AlertTitle>
                 <AlertDescription>{reserveNote(hold, reserve.limits)}</AlertDescription>
+              </Alert>
+            )}
+            {warning && (
+              <Alert>
+                <AlertTriangleIcon className="text-warning" />
+                <AlertTitle>{warningLabel(warning)}</AlertTitle>
+                <AlertDescription>
+                  {warningNote(warning)} {warning.kind === 'problem' ? 'Sign in again to check.' : 'Sign in again to fix it.'}
+                </AlertDescription>
               </Alert>
             )}
             {c.status_message && (

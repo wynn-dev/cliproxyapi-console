@@ -6,7 +6,7 @@ import { StatusDot } from '@/components/common'
 import { CredentialSheet } from '@/components/credentials/credential-sheet'
 import { accountName, credState, reserveHold, reserveNote, useAccountParam } from '@/components/credentials/lib'
 import { ModelsDialog } from '@/components/credentials/models-dialog'
-import { CredentialStatus } from '@/components/credentials/status'
+import { CredentialStatus, SignInHint } from '@/components/credentials/status'
 import { AccountMeters } from '@/components/limit-meter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -182,11 +182,12 @@ function AccountRow({
               {hold && reserve && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="cursor-default text-xs text-muted-foreground/80">· reserve overridden</span>
+                    <span className="cursor-default text-xs text-muted-foreground/80">· {hold.released ? 'released' : 'reserve overridden'}</span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">{reserveNote(hold, reserve.limits)}</TooltipContent>
                 </Tooltip>
               )}
+              <SignInHint credential={c} />
             </span>
           ) : (
             <CredentialStatus credential={c} />

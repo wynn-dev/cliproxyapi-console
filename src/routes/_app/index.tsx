@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
+import { PoolAvailability } from '@/components/pool-availability'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
 import { CopyButton, PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
@@ -75,6 +76,7 @@ function Overview() {
       />
       <ProcessCard status={status} />
       <ForecastLine />
+      <PoolAvailability running={running} />
       <AccountsCard running={running} account={account} />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

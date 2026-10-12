@@ -51,8 +51,13 @@ export function AccountMeters({
   const hold = reserveHold(c, reserve)
   // The caption goes on the limits that tripped the hold, or on all of them when none of them did.
   const tripped = (w: LimitWindow) => !!hold && (hold.reason === 'extra-usage' ? hold.windows.includes(w.label) : hold.windows.includes(RESERVE_WINDOWS[w.label]!))
-  const held = hold && !hold.overridden ? { label: holdLabel(hold), until: hold.until } : undefined
+  // A needed sign-in has no end to count down to; the status says it.
+  const held = hold && !hold.overridden && hold.reason !== 'signed-out' ? { label: holdLabel(hold), until: hold.until } : undefined
   const heldOn = windows.some(tripped) ? tripped : () => true
+  // The Fable reserve holds only the Fable models, on its own meter; this is the console's own hold,
+  // whichever reading the meter shows.
+  const fable = reserve?.fable?.[c.name]
+  const fableHeld = fable && { label: fable.billing ? 'Paid extra usage' : 'Reserved', until: fable.until }
 
   if (!windows.length) {
     return (
@@ -65,6 +70,7 @@ export function AccountMeters({
     <div className={cn('grid grid-cols-2 gap-x-6 gap-y-3', className)}>
       {meters.map(({ w, at, checked, kept }) => {
         const id = RESERVE_WINDOWS[w.label]
+        const isFable = c.provider === 'claude' && w.label === 'Fable'
         return (
           <LimitMeter
             key={w.id}
@@ -73,8 +79,8 @@ export function AccountMeters({
             observedAt={at}
             checked={checked}
             older={kept}
-            reserve={id && reserve?.limits[id]}
-            held={held && heldOn(w) ? held : undefined}
+            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : undefined}
+            held={held && heldOn(w) ? held : isFable ? fableHeld : undefined}
             detailed={detailed}
           />
         )

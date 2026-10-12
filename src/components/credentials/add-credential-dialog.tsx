@@ -21,10 +21,12 @@ import { Field, FieldError } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ApiError, mgmt } from '@/lib/api'
+import { ApiError, consoleApi, mgmt } from '@/lib/api'
 import { fmtBytes } from '@/lib/format'
 import { OAUTH_PROVIDERS } from '@/lib/providers'
+import type { Credential } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { accountName } from './lib'
 
 export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [tab, setTab] = useState('oauth')
@@ -54,6 +56,25 @@ export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onO
   )
 }
 
+/** Signs an existing account in again: the same OAuth flow, with the account's file and fields kept. */
+export function SignInAgainDialog({ account, onOpenChange }: { account: Credential | null; onOpenChange: (open: boolean) => void }) {
+  const close = useCallback(() => onOpenChange(false), [onOpenChange])
+  return (
+    <Dialog open={!!account} onOpenChange={onOpenChange}>
+      <DialogContent className="gap-5 sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Sign in again</DialogTitle>
+          <DialogDescription>
+            Sign in as {account ? accountName(account) : 'this account'}. It keeps its file, priority, note and excluded models, and goes back
+            into rotation.
+          </DialogDescription>
+        </DialogHeader>
+        {account && <OAuthPanel key={account.name} account={account} onDone={close} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // --- OAuth -------------------------------------------------------------------------------------
 
 type Provider = (typeof OAUTH_PROVIDERS)[number]
@@ -72,14 +93,50 @@ interface Flow {
 
 type Outcome = { ok: true } | { ok: false; error: string }
 
-function OAuthPanel({ onDone }: { onDone: () => void }) {
+/** What the console did once a sign-in again completed (server/sign-in.ts). */
+interface SignInResult {
+  status: 'wait' | 'done' | 'error'
+  error?: string
+  account?: { name: string; signedIn: boolean; restored: string[]; enabled: boolean; other: string[] }
+}
+
+/** Title, text and tone for the outcome of signing `account` in again. */
+function againOutcome(account: Credential, r: SignInResult) {
+  const name = accountName(account)
+  const a = r.account
+  if (r.status === 'error' || !a) {
+    return { ok: false, title: 'Signed in, not confirmed', text: `The console could not check ${name}${r.error ? ` (${r.error})` : ''}. Check it on Credentials.` }
+  }
+  if (a.signedIn) {
+    const restored = a.restored.length ? `; restored its ${a.restored.join(', ').replace(/_/g, ' ')}` : ''
+    return { ok: true, title: 'Signed in again', text: `${a.enabled ? "It's back in rotation" : 'Its sign-in is updated'}${restored}.` }
+  }
+  return {
+    ok: false,
+    title: `Not signed in as ${name}`,
+    text: a.other.length
+      ? `The sign-in created or updated a different account file (${a.other.join(', ')}). ${name} is unchanged; if it is no longer needed, delete it from its panel.`
+      : `The sign-in didn't update ${name}, so nothing changed. Try again with the right account.`,
+  }
+}
+
+function OAuthPanel({ onDone, account }: { onDone: () => void; account?: Credential }) {
   const qc = useQueryClient()
   const [flow, setFlow] = useState<Flow | null>(null)
 
   const start = useMutation({
-    mutationFn: (p: Provider) => mgmt<AuthUrlResponse>('/oauth/auth-url', { query: { provider: p.id, is_webui: true } }),
+    mutationFn: async (p: Provider) => {
+      const r = await mgmt<AuthUrlResponse>('/oauth/auth-url', { query: { provider: p.id, is_webui: true } })
+      // The console follows the session itself, so the account goes back into rotation even if this closes.
+      if (account) await consoleApi('/sign-in', { body: { state: r.state, provider: p.id, name: account.name } }).catch(() => {})
+      return r
+    },
     onSuccess: (r, p) => setFlow({ provider: p, state: r.state, url: r.url }),
   })
+  const provider = OAUTH_PROVIDERS.find((p) => p.id === account?.provider)
+  useEffect(() => {
+    if (provider) start.mutate(provider)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = useQuery({
     queryKey: ['oauth-status', flow?.state],
@@ -105,17 +162,51 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
   useEffect(() => () => void (pending.current && cancel(pending.current)), [])
 
   const succeeded = outcome?.ok === true
+  const result = useQuery({
+    queryKey: ['sign-in', flow?.state],
+    queryFn: () =>
+      consoleApi<SignInResult>('/sign-in', { query: { state: flow!.state } }).catch((e: Error): SignInResult => ({ status: 'error', error: e.message })),
+    enabled: succeeded && !!account,
+    refetchInterval: (q) => (!q.state.data || q.state.data.status === 'wait' ? 1000 : false),
+    gcTime: 0,
+  }).data
+  const settled = succeeded && (!account || (!!result && result.status !== 'wait'))
+  const again = account && settled ? againOutcome(account, result!) : undefined
   useEffect(() => {
-    if (!succeeded || !flow) return
-    toast.success(`${flow.provider.name} account added`)
+    if (!settled || !flow) return
+    if (!again) toast.success(`${flow.provider.name} account added`)
+    else if (again.ok) toast.success(`${accountName(account!)} is signed in again`)
+    else toast.warning(again.title, { description: again.text })
     void qc.invalidateQueries({ queryKey: ['mgmt', 'credentials'] })
+    void qc.invalidateQueries({ queryKey: ['console', 'reserve'] })
     const t = setTimeout(onDone, 1200)
     return () => clearTimeout(t)
-  }, [succeeded]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [settled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const back = () => {
     if (pending.current) cancel(pending.current)
     setFlow(null)
+  }
+
+  if (!flow && provider) {
+    return start.error ? (
+      <Alert variant="destructive">
+        <CircleAlertIcon />
+        <AlertTitle>Could not start sign-in</AlertTitle>
+        <AlertDescription className="space-y-3">
+          <p>{start.error.message}</p>
+          <Button variant="outline" size="sm" onClick={() => start.mutate(provider)} disabled={start.isPending}>
+            {start.isPending ? <Spinner /> : <RotateCwIcon />}
+            Try again
+          </Button>
+        </AlertDescription>
+      </Alert>
+    ) : (
+      <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+        <Spinner />
+        Starting sign-in…
+      </div>
+    )
   }
 
   if (!flow) {
@@ -153,9 +244,17 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
   if (outcome?.ok) {
     return (
       <div className="flex flex-col items-center gap-2 py-8 text-center">
-        <CheckCircle2Icon className="size-8 text-success" />
-        <div className="font-medium">{flow.provider.name} account added</div>
-        <div className="text-sm text-muted-foreground">It's now part of the rotation.</div>
+        {!settled ? (
+          <Spinner className="size-8" />
+        ) : again && !again.ok ? (
+          <CircleAlertIcon className="size-8 text-warning" />
+        ) : (
+          <CheckCircle2Icon className="size-8 text-success" />
+        )}
+        <div className="font-medium">{again ? again.title : !account ? `${flow.provider.name} account added` : 'Signed in'}</div>
+        <div className="text-sm text-muted-foreground">
+          {again ? again.text : !account ? "It's now part of the rotation." : 'Checking the account…'}
+        </div>
       </div>
     )
   }
@@ -163,9 +262,11 @@ function OAuthPanel({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon-sm" aria-label="Choose another provider" onClick={back}>
-          <ArrowLeftIcon />
-        </Button>
+        {!account && (
+          <Button variant="ghost" size="icon-sm" aria-label="Choose another provider" onClick={back}>
+            <ArrowLeftIcon />
+          </Button>
+        )}
         <div className="font-medium">Sign in to {flow.provider.name}</div>
       </div>
 

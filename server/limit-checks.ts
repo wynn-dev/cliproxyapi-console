@@ -1,5 +1,9 @@
+import fs from 'node:fs'
+import YAML from 'yaml'
+import { paths } from './env.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
 import { management } from './management.ts'
+import { reserveStatus } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { db } from './usage.ts'
 
@@ -22,17 +26,50 @@ const MAX_BACKOFF_MS = 6 * 3600_000
 const backoff = (failures: number) => Math.min(MAX_BACKOFF_MS, STALE_MS * 2 ** failures)
 
 /**
- * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point the checks at a
- * mock instead of the real providers. Not a user option.
+ * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point one provider's
+ * checks at a mock on this machine, reached directly rather than through the account's proxy. Not a
+ * user option. Any other host disables that provider's checks, so a typo never reaches a real one.
  */
-const USAGE_URL: Record<string, string> = {
-  claude: process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || 'https://api.anthropic.com/api/oauth/usage',
-  codex: process.env.CPA_CONSOLE_CODEX_USAGE_URL || 'https://chatgpt.com/backend-api/wham/usage',
+function endpoint(provider: string, variable: string, real: string) {
+  const override = process.env[variable]
+  if (!override) return { url: real, direct: false }
+  let host = ''
+  try {
+    host = new URL(override).hostname
+  } catch {
+    // Not a URL: refused below.
+  }
+  if (host === '127.0.0.1' || host === 'localhost') return { url: override, direct: true }
+  console.error(`Limit check: ${variable} must point at 127.0.0.1 or localhost; ${provider} accounts won't be checked.`)
+  return undefined
 }
-/** A local mock is reached directly, not through the account's proxy. */
-const MOCKED = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL)
-/** CPA's default Claude Code fingerprint, so the check looks like the account's other traffic. */
-const CLAUDE_USER_AGENT = 'claude-cli/2.1.280 (external, cli)'
+
+const ENDPOINTS: Record<string, { url: string; direct: boolean } | undefined> = {
+  claude: endpoint('Claude', 'CPA_CONSOLE_CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage'),
+  codex: endpoint('Codex', 'CPA_CONSOLE_CODEX_USAGE_URL', 'https://chatgpt.com/backend-api/wham/usage'),
+}
+
+/** CPA's own defaults (claude_device_profile.go, codex_executor_request.go), used unless config.yaml sets one. */
+const DEFAULT_USER_AGENT = {
+  claude: 'claude-cli/2.1.280 (external, cli)',
+  codex: 'codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)',
+}
+
+/** The user agent CPA sends for this provider, so a check looks like the account's other traffic. */
+function userAgent(provider: 'claude' | 'codex') {
+  try {
+    const doc = YAML.parse(fs.readFileSync(paths.config, 'utf8')) ?? {}
+    const set =
+      provider === 'claude'
+        ? (doc.upstream?.claude?.['header-defaults'] ?? doc.oauth?.providers?.claude?.['header-defaults'] ?? doc['claude-header-defaults'])
+        : (doc.oauth?.providers?.codex?.['header-defaults'] ?? doc['codex-header-defaults'])
+    const ua = set?.['user-agent']
+    if (typeof ua === 'string' && ua.trim()) return ua.trim()
+  } catch {
+    // Unreadable config: CPA's defaults.
+  }
+  return DEFAULT_USER_AGENT[provider]
+}
 
 db.exec(`CREATE TABLE IF NOT EXISTS limit_checks (
   name TEXT PRIMARY KEY,
@@ -60,6 +97,7 @@ const saveRow = db.prepare(`
   INSERT INTO limit_checks (name, checked_at, ok_at, failures, status, error) VALUES (?, ?, ?, ?, ?, ?)
   ON CONFLICT (name) DO UPDATE SET checked_at = excluded.checked_at, ok_at = excluded.ok_at, failures = excluded.failures,
     status = excluded.status, error = excluded.error`)
+const deleteRow = db.prepare('DELETE FROM limit_checks WHERE name = ?')
 
 export const limitChecksEnabled = () => readState().limitChecks === true
 
@@ -92,36 +130,40 @@ type Listed = ListedCredential & { auth_index?: string; account_type?: string; i
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : undefined)
 const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined)
 
-/** Unix seconds from an ISO time or a number of seconds or milliseconds. */
+/** Unix seconds from an ISO time or a number of seconds. */
 function unixSeconds(v: unknown) {
   const n = num(v)
-  if (n !== undefined) return Math.floor(n > 1e12 ? n / 1000 : n)
+  if (n !== undefined) return Math.floor(n)
   const ms = typeof v === 'string' ? Date.parse(v) : NaN
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : undefined
 }
 
+/** A reset time that can belong to a 5-hour or weekly window seen now. */
+const plausibleReset = (reset: number | undefined, now: number): reset is number =>
+  !!reset && reset * 1000 > now - 3_600_000 && reset * 1000 <= now + 7 * 86_400_000 + 3_600_000
+
+const validPercent = (v: number | undefined): v is number => v !== undefined && v >= 0 && v <= 100
+
 /**
- * Claude's usage response as the `anthropic-ratelimit-unified-*` headers it stands for. Utilization
- * there is a percent, in the headers a share. Newer responses also carry a `limits` list; the
- * model-scoped weekly entry for Fable is the `7d_oi` (overage included) window.
+ * Claude's usage response as the `anthropic-ratelimit-unified-*` headers it stands for, or why it
+ * can't be used. Only the 5-hour and weekly windows are read: their `utilization` is a percent,
+ * where the headers carry a share. Newer responses also list limits with a `percent` whose scale is
+ * unconfirmed, so those are left out rather than guessed at. A number that could release a held
+ * account wrongly fails the check instead.
  */
-export function claudeSignals(body: unknown) {
+export function claudeSignals(body: unknown, now: number): Record<string, string> | string {
   const b = obj(body) ?? {}
   const out: Record<string, string> = {}
-  const set = (id: string, used: unknown, resetsAt: unknown) => {
-    const pct = num(used)
-    if (pct === undefined || `anthropic-ratelimit-unified-${id}-utilization` in out) return
-    out[`anthropic-ratelimit-unified-${id}-utilization`] = String(pct / 100)
-    const reset = unixSeconds(resetsAt)
+  for (const [key, id, label] of [['five_hour', '5h', '5-hour'], ['seven_day', '7d', 'weekly']]) {
+    const w = obj(b[key])
+    const used = num(w?.utilization)
+    if (!validPercent(used)) return `The answer had no valid ${label} usage`
+    const reset = unixSeconds(w?.resets_at)
+    // A window that hasn't started has no reset yet. 0% used without a reset can't release a held
+    // account: the reserve only trusts a window with a reset time.
+    if (!plausibleReset(reset, now) && !(used === 0 && w?.resets_at == null)) return `The answer had no valid ${label} reset time`
+    out[`anthropic-ratelimit-unified-${id}-utilization`] = String(used / 100)
     if (reset) out[`anthropic-ratelimit-unified-${id}-reset`] = String(reset)
-  }
-  for (const [key, id] of [['five_hour', '5h'], ['seven_day', '7d'], ['seven_day_overage_included', '7d_oi']]) {
-    set(id, obj(b[key])?.utilization, obj(b[key])?.resets_at)
-  }
-  for (const l of Array.isArray(b.limits) ? b.limits.map(obj) : []) {
-    const scope = String(obj(obj(l?.scope)?.model)?.display_name ?? '')
-    const id = l?.kind === 'session' ? '5h' : l?.kind === 'weekly_all' ? '7d' : l?.kind === 'weekly_scoped' && /fable/i.test(scope) ? '7d_oi' : undefined
-    if (id) set(id, l?.percent ?? l?.utilization, l?.resets_at)
   }
   return out
 }
@@ -129,56 +171,49 @@ export function claudeSignals(body: unknown) {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 /**
- * Codex's usage response as the `x-codex-*` headers it stands for. Extra limits (e.g. a model with
- * its own allowance) are named after their metered feature, as in the headers (`codex_bengalfox`
- * there is `x-codex-bengalfox-*`).
+ * Codex's usage response as the `x-codex-*` headers it stands for, or why it can't be used. The main
+ * 5-hour window is required. Reset times are stored as absolute times only. Extra limits (a model
+ * with its own allowance) are named after their metered feature, as in the headers (`codex_bengalfox`
+ * there is `x-codex-bengalfox-*`), and an invalid one is left out.
  */
-export function codexSignals(body: unknown) {
+export function codexSignals(body: unknown, now: number): Record<string, string> | string {
   const b = obj(body) ?? {}
-  const out: Record<string, string> = {}
-  const windows = (prefix: string, rate: Record<string, unknown> | undefined) => {
-    let any = false
-    for (const slot of ['primary', 'secondary']) {
-      const w = obj(rate?.[`${slot}_window`] ?? rate?.[slot])
-      const used = num(w?.used_percent)
-      if (!w || used === undefined) continue
-      const p = `${prefix}${slot}-`
-      out[`${p}used-percent`] = String(used)
-      const seconds = num(w.limit_window_seconds)
-      const minutes = num(w.window_minutes) ?? (seconds !== undefined ? Math.round(seconds / 60) : undefined)
-      if (minutes) out[`${p}window-minutes`] = String(minutes)
-      const resetAt = unixSeconds(w.reset_at)
-      if (resetAt) out[`${p}reset-at`] = String(resetAt)
-      const after = num(w.reset_after_seconds)
-      if (after !== undefined) out[`${p}reset-after-seconds`] = String(after)
-      any = true
+  const window = (prefix: string, slot: string, w: Record<string, unknown> | undefined) => {
+    const used = num(w?.used_percent)
+    const label = slot === 'primary' ? '5-hour' : 'weekly'
+    if (!w || !validPercent(used)) return `no valid ${label} usage`
+    const after = num(w.reset_after_seconds)
+    const reset = unixSeconds(w.reset_at) ?? (after !== undefined && after >= 0 ? Math.floor(now / 1000 + after) : undefined)
+    if (!plausibleReset(reset, now)) return `no valid ${label} reset time`
+    const seconds = num(w.limit_window_seconds)
+    const minutes = num(w.window_minutes) ?? (seconds !== undefined ? Math.round(seconds / 60) : undefined)
+    return {
+      [`${prefix}${slot}-used-percent`]: String(used),
+      [`${prefix}${slot}-reset-at`]: String(reset),
+      ...(minutes && minutes > 0 ? { [`${prefix}${slot}-window-minutes`]: String(minutes) } : {}),
     }
-    return any
   }
-  windows('x-codex-', obj(b.rate_limit))
+  const windows = (prefix: string, rate: Record<string, unknown> | undefined) =>
+    ['primary', 'secondary'].map((slot) => (rate?.[`${slot}_window`] ?? rate?.[slot]) == null ? {} : window(prefix, slot, obj(rate?.[`${slot}_window`] ?? rate?.[slot])))
+
+  const rate = obj(b.rate_limit)
+  if (!obj(rate?.primary_window ?? rate?.primary)) return 'The answer had no 5-hour usage'
+  const out: Record<string, string> = {}
+  for (const w of windows('x-codex-', rate)) {
+    if (typeof w === 'string') return `The answer had ${w}`
+    Object.assign(out, w)
+  }
   const extra = Array.isArray(b.additional_rate_limits) ? b.additional_rate_limits : Object.values(obj(b.additional_rate_limits) ?? {})
   for (const a of extra.map(obj)) {
     const name = typeof a?.limit_name === 'string' ? a.limit_name : ''
     const scope = slug(String(a?.metered_feature ?? '').replace(/^codex_/, '') || name)
-    if (scope && windows(`x-codex-${scope}-`, obj(a?.rate_limit)) && name) out[`x-codex-${scope}-limit-name`] = name
+    const ws = windows(`x-codex-${scope}-`, obj(a?.rate_limit))
+    if (!scope || ws.some((w) => typeof w === 'string') || !ws.some((w) => Object.keys(w).length)) continue
+    for (const w of ws) Object.assign(out, w)
+    if (name) out[`x-codex-${scope}-limit-name`] = name
   }
-  if (Object.keys(out).length && typeof b.plan_type === 'string') out['x-codex-plan-type'] = b.plan_type
+  if (typeof b.plan_type === 'string') out['x-codex-plan-type'] = b.plan_type
   return out
-}
-
-/**
- * Signals of the previous reading for windows the check did not report (another model's limit, extra
- * usage), so a check never makes them disappear. They stay as old as they were.
- */
-function carried(provider: string, prev: Record<string, string> | undefined, fresh: Record<string, string>) {
-  const owned: string[] = []
-  for (const k of Object.keys(fresh)) {
-    const m = provider === 'claude' ? /^(anthropic-ratelimit-unified-.+?-)utilization$/.exec(k) : /^(x-codex-(?:.+-)?)(?:primary|secondary)-used-percent$/.exec(k)
-    if (!m) continue
-    if (provider === 'claude') owned.push(m[1])
-    else owned.push(`${m[1]}primary-`, `${m[1]}secondary-`, `${m[1]}limit-name`)
-  }
-  return Object.fromEntries(Object.entries(prev ?? {}).filter(([k]) => !owned.some((p) => k.toLowerCase().startsWith(p))))
 }
 
 /** Header-name case as CPA stores signals (Go's canonical form), for readers that look keys up as is. */
@@ -204,22 +239,26 @@ function fail(name: string, prev: Row | undefined, now: number, status: number, 
   if (failures === 1) console.error(`Limit check: ${name} failed: ${error}. Trying again less often.`)
 }
 
-async function check(f: Listed, prev: Row | undefined, reading: Record<string, string> | undefined, now: number) {
+async function check(f: Listed, prev: Row | undefined, now: number) {
   const provider = f.provider as 'claude' | 'codex'
-  const header: Record<string, string> = { Authorization: 'Bearer $TOKEN$', Accept: 'application/json' }
-  if (provider === 'claude') {
-    header['anthropic-beta'] = 'oauth-2025-04-20'
-    header['User-Agent'] = CLAUDE_USER_AGENT
-  } else {
-    header['User-Agent'] = 'codex_cli_rs'
-    header.Originator = 'codex_cli_rs'
+  const target = ENDPOINTS[provider]!
+  const header: Record<string, string> = { Authorization: 'Bearer $TOKEN$', Accept: 'application/json', 'User-Agent': userAgent(provider) }
+  if (provider === 'claude') header['anthropic-beta'] = 'oauth-2025-04-20'
+  else {
+    header.Originator = 'codex-tui'
     if (f.id_token?.chatgpt_account_id) header['ChatGPT-Account-Id'] = f.id_token.chatgpt_account_id
   }
   let res: Response | undefined
   try {
-    res = await management('/requests/api-call', { method: 'POST', body: { auth_index: f.auth_index, method: 'GET', url: USAGE_URL[provider], header, ...(MOCKED && { proxy_url: 'direct' }) } })
+    res = await management('/requests/api-call', {
+      method: 'POST',
+      body: { auth_index: f.auth_index, method: 'GET', url: target.url, header, ...(target.direct && { proxy_url: 'direct' }) },
+    })
   } catch (err) {
-    return fail(f.name, prev, now, 0, `No answer: ${(err as Error).message}`)
+    // CPA restarting refuses the connection: not the account's fault. A timeout may be.
+    const name = (err as Error).name
+    if (name !== 'TimeoutError' && name !== 'AbortError') return
+    return fail(f.name, prev, now, 0, 'No answer within 10 seconds')
   }
   // CPA stopped or restarting: not the account's fault.
   if (!res) return
@@ -236,9 +275,10 @@ async function check(f: Listed, prev: Row | undefined, reading: Record<string, s
   } catch {
     return fail(f.name, prev, now, status, 'The answer was not JSON')
   }
-  const signals = provider === 'claude' ? claudeSignals(body) : codexSignals(body)
-  if (!Object.keys(signals).length) return fail(f.name, prev, now, status, 'The answer had no limits in it')
-  saveReading(f.name, now, { ...carried(provider, reading, signals), ...canonical(signals) })
+  const signals = provider === 'claude' ? claudeSignals(body, now) : codexSignals(body, now)
+  if (typeof signals === 'string') return fail(f.name, prev, now, status, signals)
+  // Nothing is carried over from the last reading: it would be stored as if seen now.
+  saveReading(f.name, now, canonical(signals))
   saveRow.run(f.name, now, now, 0, 0, '')
   if (prev?.failures) console.log(`Limit check: ${f.name} works again`)
 }
@@ -250,18 +290,22 @@ async function checkNext(now = Date.now()) {
   const { files } = (await res.json()) as { files?: Listed[] }
   const readings = limitReadings()
   const checks = rows()
+  const held = reserveStatus().accounts
+  // Forget credentials that were removed.
+  for (const name of checks.keys()) if (!files?.some((f) => f.name === name)) deleteRow.run(name)
   let next: { f: Listed; readAt: number } | undefined
   for (const f of files ?? []) {
-    // Subscription accounts only: an API key has no usage page. Disabled ones are checked too, so the
-    // reserve sees a held-back account recover.
-    if (!f.provider || !(f.provider in USAGE_URL) || f.account_type !== 'oauth' || !f.auth_index) continue
+    // Subscription accounts only: an API key has no usage page. Of the disabled ones, only those the
+    // reserve holds, so it sees them recover; one the user turned off is left alone.
+    if (!f.provider || !ENDPOINTS[f.provider] || f.account_type !== 'oauth' || !f.auth_index) continue
+    if (f.disabled && !(f.name in held)) continue
     const readAt = Math.max(Date.parse(readings[f.name]?.observed_at ?? '') || 0, Date.parse(f.quota?.observed_at ?? '') || 0)
     if (now - readAt < STALE_MS) continue
     const row = checks.get(f.name)
     if (row && now < row.checked_at + (row.failures ? backoff(row.failures) : STALE_MS)) continue
     if (!next || readAt < next.readAt) next = { f, readAt }
   }
-  if (next) await check(next.f, checks.get(next.f.name), readings[next.f.name]?.signals, now)
+  if (next) await check(next.f, checks.get(next.f.name), now)
 }
 
 export function startLimitChecks() {

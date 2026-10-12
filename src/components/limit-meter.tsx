@@ -2,7 +2,9 @@ import { Countdown } from '@/components/credentials/status'
 import { holdLabel, reserveHold } from '@/components/credentials/lib'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtWhen } from '@/lib/format'
-import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow } from '@/lib/limits'
+import { fmtAccounts } from '@/lib/insights'
+import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow, type PoolWeekly } from '@/lib/limits'
+import { providerLabel } from '@/lib/providers'
 import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -176,6 +178,64 @@ function LimitMeter({
             {checked ? 'Checked' : 'Reported'} {fmtAgo(observedAt)}
           </div>
         )}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** A provider's weekly limits added up over its accounts, as one meter. */
+export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; reserve?: number; now: number }) {
+  const share = p.left / p.accounts
+  const pct = Math.round(share * 100)
+  const tone = METER_TONE[share <= 0 ? 'exhausted' : share <= 0.2 ? 'warning' : 'ok']
+  const name = providerLabel(p.provider)
+  const gain = p.nextReset && Math.round((p.nextReset.gain / p.accounts) * 100)
+  const reset = p.nextReset && `${p.left < p.accounts ? 'first ' : ''}reset in ${fmtUntil(p.nextReset.at - now)}${gain ? `, +${gain}%` : ''}`
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${name} weekly limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="truncate text-muted-foreground">
+              <span className="font-medium text-foreground">{name}</span> · {p.accounts} accounts
+            </span>
+            <span className="font-medium tabular">
+              {pct}% <span className="font-normal text-muted-foreground">left</span>
+            </span>
+          </div>
+          <div className="relative">
+            <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
+              <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
+            </div>
+            {!!reserve && (
+              <div aria-hidden className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70 ring-1 ring-card" style={{ left: `${reserve}%` }} />
+            )}
+          </div>
+          <div className="text-[11px] text-muted-foreground first-letter:uppercase">{reset ?? ' '}</div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">
+        <div className="font-medium">
+          {name} weekly, all accounts: {pct}% left
+        </div>
+        <div>
+          {fmtAccounts(p.left).replace(/^./, (c) => c.toUpperCase())} left of {p.accounts}
+        </div>
+        {p.nextReset && (
+          <div>
+            Next reset {fmtWhen(p.nextReset.at)}
+            {gain ? `, gives back ${gain}%` : ''}
+          </div>
+        )}
+        {!!reserve && <div>{reserve}% of each account kept in reserve for direct use (the tick)</div>}
+        {p.unread > 0 && (
+          <div>
+            {p.unread} account{p.unread === 1 ? " hasn't" : "s haven't"} reported {p.unread === 1 ? 'its' : 'their'} weekly limit yet and count
+            {p.unread === 1 ? 's' : ''} as unused.
+          </div>
+        )}
+        <div className="opacity-80">Every account counts the same, whatever its plan. Accounts you turned off are left out.</div>
       </TooltipContent>
     </Tooltip>
   )

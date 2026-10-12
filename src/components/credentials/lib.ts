@@ -54,7 +54,7 @@ const WINDOW_NAMES: Record<ReserveWindow, string> = { '5h': '5\u2011hour', weekl
 export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) {
   const share = hold.windows.map((w) => `${limits[w]}% of its ${WINDOW_NAMES[w]} limit`).join(' and ')
   return hold.overridden
-    ? `Enabled by hand with less than ${share} left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
+    ? `Enabled by hand with ${share} or less left. The account reserve leaves it on until ${fmtWhen(hold.until)}.`
     : `Turned off by the account reserve to keep ${share} free for direct use, until ${fmtWhen(hold.until)}. Enable it to use it anyway.`
 }
 

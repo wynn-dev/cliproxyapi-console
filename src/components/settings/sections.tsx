@@ -200,7 +200,7 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
         unit="%"
         description={
           <>
-            The console disables an account once less than this share of its 5-hour limit is left, and enables it again when the limit resets.
+            The console disables an account once this share of its 5-hour limit or less is left, and enables it again when the limit resets.
             0 turns this off.
             <Default>5%</Default>
           </>

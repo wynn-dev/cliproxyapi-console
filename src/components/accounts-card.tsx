@@ -166,9 +166,10 @@ function AccountRow({
       </div>
       {windows.length ? (
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
-          {windows.map((w) => (
-            <LimitMeter key={w.id} window={w} now={now} observedAt={observedAt} reserve={reserve?.limits[RESERVE_WINDOWS[w.label]]} />
-          ))}
+          {windows.map((w) => {
+            const id = RESERVE_WINDOWS[w.label]
+            return <LimitMeter key={w.id} window={w} now={now} observedAt={observedAt} reserve={id && reserve?.limits[id]} />
+          })}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground lg:pt-0.5">

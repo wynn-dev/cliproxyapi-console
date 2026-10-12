@@ -74,6 +74,8 @@ export function useReserveWrite() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (limits: Partial<ReserveStatus['limits']>) => consoleApi<ReserveStatus>('/reserve', { method: 'PUT', body: limits }),
+    // A refetch already in flight would overwrite the saved limits with the old ones.
+    onMutate: () => qc.cancelQueries({ queryKey: queries.reserve().queryKey }),
     onSuccess: (status) => qc.setQueryData(queries.reserve().queryKey, status),
     onError: (err) => toast.error('Could not save', { description: err.message }),
   })

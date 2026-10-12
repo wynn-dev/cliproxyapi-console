@@ -17,6 +17,8 @@ export interface ConsoleState {
   holdExtraUsage?: boolean
   /** Smart account order: the console sets Claude and Codex priorities. On unless turned off. */
   smartOrder?: boolean
+  /** Ask each provider's usage endpoint for idle accounts' limits. Opt-in: the endpoints are undocumented. */
+  limitChecks?: boolean
 }
 
 let cached: ConsoleState | undefined

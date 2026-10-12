@@ -4,6 +4,7 @@ import { startAccessLog } from './access-log.ts'
 import { app, ensureInstalledAndStart, setupToken } from './app.ts'
 import { env, paths } from './env.ts'
 import { flushLimitHistory } from './limit-history.ts'
+import { startLimitChecks } from './limit-checks.ts'
 import { startLimitRecorder } from './limits.ts'
 import { supervisor } from './supervisor.ts'
 import { consoleUrls } from './urls.ts'
@@ -36,6 +37,7 @@ export async function startServer({ open = false } = {}) {
     startCollector()
     startLimitRecorder()
     startAccessLog()
+    startLimitChecks()
     ensureInstalledAndStart().catch((err) => console.error(`Failed to install CLIProxyAPI: ${err.message}`))
   }).on('error', (err: NodeJS.ErrnoException) => {
     console.error(err.code === 'EADDRINUSE' ? `Port ${env.port} is already in use (is the console already running?). Try --port <port>.` : err.message)

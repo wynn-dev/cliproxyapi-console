@@ -379,7 +379,7 @@ export function CredentialsTable({ files, loading }: { files: Credential[]; load
           value={status}
           onValueChange={(v) => v && setStatus(v as StatusFilter)}
           aria-label="Status"
-          className="max-w-full overflow-x-auto"
+          className="-m-1 max-w-full overflow-x-auto p-1"
         >
           {STATUS_FILTERS.map((s) => (
             <ToggleGroupItem key={s.value} value={s.value} className="gap-1.5 px-2.5 data-[state=on]:font-medium">

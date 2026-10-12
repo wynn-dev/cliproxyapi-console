@@ -71,7 +71,7 @@ function PoolRow({ pool: p, now, reserve }: { pool: PoolForecast; now: number; r
             <Fact
               label="Readings"
               value={[w.read < p.accounts && `${w.read} of ${p.accounts} accounts`, w.stale > 0 && `${w.stale} over 12h old`].filter(Boolean).join(' · ')}
-              hint="An account only reports its limits when it serves a request, so idle accounts have old readings or none. Turning on idle account limits (Settings → Routing) keeps them fresh."
+              hint="An account only reports its limits when it serves a request, so idle accounts have old readings or none. Accounts without a reading count as unused. Turning on idle account limits (Settings → Routing) keeps them fresh."
             />
           )}
         </dl>

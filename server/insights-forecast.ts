@@ -72,12 +72,12 @@ interface Inputs {
   now: number
 }
 
-function windowForecast(kind: ReserveWindow, accounts: SimAccount[], stale: number, { names, pool, starts, reserve, now }: Inputs): WindowForecast {
+function windowForecast(kind: ReserveWindow, accounts: SimAccount[], read: number, stale: number, { names, pool, starts, reserve, now }: Inputs): WindowForecast {
   const { period, lookback, minHistory, horizon } = WINDOWS[kind]
   const left = accounts.reduce((s, a) => s + a.left, 0)
   const nextResetAt = Math.min(...accounts.map((a) => a.resetsAt ?? Infinity))
-  const base = { left, read: accounts.length, stale, horizonMs: horizon, basisMs: 0, nextResetAt: Number.isFinite(nextResetAt) ? nextResetAt : undefined }
-  if (!accounts.length) return { ...base, status: 'learning' }
+  const base = { left, read, stale, horizonMs: horizon, basisMs: 0, nextResetAt: Number.isFinite(nextResetAt) ? nextResetAt : undefined }
+  if (!read) return { ...base, status: 'learning' }
   if (left <= 1e-9) return { ...base, status: 'dry', backAt: base.nextResetAt }
 
   const first = Math.min(...names.map((n) => starts.get(n) ?? Infinity))
@@ -108,6 +108,7 @@ export function forecast(now = Date.now()): ForecastReport {
     const members = all.filter((a) => a.inPool)
     if (!members.length) continue
     const sim: Record<ReserveWindow, SimAccount[]> = { weekly: [], '5h': [] }
+    const read: Record<ReserveWindow, number> = { weekly: 0, '5h': 0 }
     const stale: Record<ReserveWindow, number> = { weekly: 0, '5h': 0 }
     for (const m of members) {
       const reading = readings[m.name]
@@ -119,13 +120,18 @@ export function forecast(now = Date.now()): ForecastReport {
       }
       for (const kind of ['weekly', '5h'] as const) {
         const w = windows[kind]
-        if (!w) continue
         const full = 1 - reserve[kind] / 100
-        const a: SimAccount = { name: m.name, priority: m.priority, left: Math.max(0, w.left - reserve[kind] / 100), full, resetsAt: w.resetsAt }
+        // No reading means the account has served nothing the console saw (with fill-first, an
+        // account further down the order), so its whole limit is still there.
+        const a: SimAccount = w
+          ? { name: m.name, priority: m.priority, left: Math.max(0, w.left - reserve[kind] / 100), full, resetsAt: w.resetsAt }
+          : { name: m.name, priority: m.priority, left: full, full }
         // An account held back for its weekly limit has no 5-hour capacity to give either.
         const weekly = sim.weekly.find((s) => s.name === m.name)
         if (kind === '5h' && weekly && weekly.left <= 1e-9) Object.assign(a, { left: 0, full: 0 })
         sim[kind].push(a)
+        if (!w) continue
+        read[kind]++
         if (old) stale[kind]++
       }
     }
@@ -133,8 +139,8 @@ export function forecast(now = Date.now()): ForecastReport {
     providers.push({
       provider,
       accounts: members.length,
-      weekly: windowForecast('weekly', sim.weekly, stale.weekly, inputs),
-      fiveHour: windowForecast('5h', sim['5h'], stale['5h'], inputs),
+      weekly: windowForecast('weekly', sim.weekly, read.weekly, stale.weekly, inputs),
+      fiveHour: windowForecast('5h', sim['5h'], read['5h'], stale['5h'], inputs),
     })
   }
   return { at: now, reserve, providers }

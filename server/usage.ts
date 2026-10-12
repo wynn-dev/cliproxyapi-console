@@ -146,7 +146,7 @@ export interface QueueRecord {
 
 const count = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : NaN)
 
-/** The breakdown's counts when it holds CPA's own invariants, as TokenBreakdown.Valid checks them. */
+/** The breakdown's counts when it holds CPA's own invariants (as TokenBreakdown.Valid checks them) and splits input from output. */
 function breakdownCounts(b: TokenBreakdown | undefined) {
   // "inconsistent" means CPA could not split the upstream's numbers at all.
   if (b?.schema_version !== 2 || (b.quality !== 'complete' && b.quality !== 'unclassified')) return
@@ -154,6 +154,8 @@ function breakdownCounts(b: TokenBreakdown | undefined) {
   const [output, nonReasoning, reasoning] = [b.output?.total_tokens, b.output?.non_reasoning_tokens, b.output?.reasoning_tokens].map(count)
   const [total, unclassified] = [b.total_tokens, b.unclassified_tokens].map(count)
   if (input !== uncached + cached + cacheWrite || output !== nonReasoning + reasoning || total !== input + output + unclassified) return
+  // An "unclassified" breakdown with empty buckets only knows the total; the plain fields may know more.
+  if (b.quality === 'complete' ? unclassified !== 0 : input + output === 0) return
   return { input, cached, cacheWrite, output, reasoning, total }
 }
 
@@ -163,7 +165,7 @@ function breakdownCounts(b: TokenBreakdown | undefined) {
  */
 function semantics(provider = '', executor = '') {
   const v = `${provider} ${executor}`.toLowerCase()
-  if (/^openai-compat/.test(provider) || executor.toLowerCase() === 'openaicompatexecutor') return 'subset'
+  if (/^openai-compat/.test(provider.toLowerCase()) || executor.toLowerCase() === 'openaicompatexecutor') return 'subset'
   if (/claude|anthropic/.test(v)) return 'cache-apart'
   if (/gemini|aistudio|antigravity|vertex|interaction/.test(v)) return 'reasoning-apart'
   return 'subset'

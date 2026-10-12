@@ -150,7 +150,11 @@ app.post('/console/api/process/:action', async (c) => {
 app.get('/console/api/limits', (c) => c.json(limitReadings()))
 app.get('/console/api/limits/history', (c) => {
   const q = c.req.query()
-  return c.json(limitHistory(Number(q.from ?? Date.now() - 7 * 86_400_000), Number(q.to ?? Date.now()), q.name || undefined))
+  const to = q.to ? Number(q.to) : Date.now()
+  const from = q.from ? Number(q.from) : to - 7 * 86_400_000
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return c.json({ error: 'from and to must be times in ms, from before to' }, 400)
+  if (to - from > 35 * 86_400_000) return c.json({ error: 'At most 35 days at a time' }, 400)
+  return c.json(limitHistory(from, to, q.name || undefined, { previous: q.previous === '1' || q.previous === 'true' }))
 })
 
 app.get('/console/api/reserve', (c) => c.json(reserveStatus()))

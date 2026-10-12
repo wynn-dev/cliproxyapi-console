@@ -163,13 +163,22 @@ export interface LimitSample {
   status: string
 }
 
-/** Samples in [from, to), oldest first, for one credential or all of them. */
-export function limitHistory(from: number, to: number, name?: string): LimitSample[] {
+/**
+ * Samples in [from, to), oldest first, for one credential or all of them. With `previous`, each
+ * window's last sample before `from` comes first too: a window that didn't change during the range
+ * has no sample in it, and a forecast needs to know where it stood at the start.
+ */
+export function limitHistory(from: number, to: number, name?: string, { previous = false } = {}): LimitSample[] {
   const byName = name ? ' AND name = ?' : ''
-  return db
-    .prepare(
-      `SELECT name, window_id AS window, label, ts, used, resets_at AS resetsAt, status
-       FROM limit_history WHERE ts >= ? AND ts < ?${byName} ORDER BY name, window_id, ts`,
-    )
+  const cols = (ts: string) => `name, window_id AS window, label, ${ts} AS ts, used, resets_at AS resetsAt, status`
+  const rows = db
+    .prepare(`SELECT ${cols('ts')} FROM limit_history WHERE ts >= ? AND ts < ?${byName} ORDER BY name, window_id, ts`)
     .all(from, to, ...(name ? [name] : [])) as unknown as LimitSample[]
+  if (!previous) return rows
+  // SQLite fills the other (bare) columns from the row that holds MAX(ts).
+  const before = db
+    .prepare(`SELECT ${cols('MAX(ts)')} FROM limit_history WHERE ts < ?${byName} GROUP BY name, window_id`)
+    .all(from, ...(name ? [name] : [])) as unknown as LimitSample[]
+  const all = [...before, ...rows]
+  return all.sort((a, b) => a.name.localeCompare(b.name) || a.window.localeCompare(b.window) || a.ts - b.ts)
 }

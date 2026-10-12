@@ -2,7 +2,6 @@ import { Countdown } from '@/components/credentials/status'
 import { holdLabel, reserveHold } from '@/components/credentials/lib'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtWhen } from '@/lib/format'
-import { fmtAccounts } from '@/lib/insights'
 import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow, type PoolWeekly } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import type { Credential, ReserveStatus } from '@/lib/types'
@@ -190,7 +189,7 @@ export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; r
   const tone = METER_TONE[share <= 0 ? 'exhausted' : share <= 0.2 ? 'warning' : 'ok']
   const name = providerLabel(p.provider)
   const gain = p.nextReset && Math.round((p.nextReset.gain / p.accounts) * 100)
-  const reset = p.nextReset && `${p.left < p.accounts ? 'first ' : ''}reset in ${fmtUntil(p.nextReset.at - now)}${gain ? `, +${gain}%` : ''}`
+  const reset = p.nextReset && `next reset in ${fmtUntil(p.nextReset.at - now)}${gain ? `, +${gain}%` : ''}`
 
   return (
     <Tooltip>
@@ -220,7 +219,7 @@ export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; r
           {name} weekly, all accounts: {pct}% left
         </div>
         <div>
-          {fmtAccounts(p.left).replace(/^./, (c) => c.toUpperCase())} left of {p.accounts}
+          {+p.left.toFixed(1)} of {p.accounts} accounts' weekly limits left
         </div>
         {p.nextReset && (
           <div>
@@ -231,11 +230,11 @@ export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; r
         {!!reserve && <div>{reserve}% of each account kept in reserve for direct use (the tick)</div>}
         {p.unread > 0 && (
           <div>
-            {p.unread} account{p.unread === 1 ? " hasn't" : "s haven't"} reported {p.unread === 1 ? 'its' : 'their'} weekly limit yet and count
+            {p.unread} account{p.unread === 1 ? " hasn't" : "s haven't"} reported {p.unread === 1 ? 'its' : 'their'} limits yet and count
             {p.unread === 1 ? 's' : ''} as unused.
           </div>
         )}
-        <div className="opacity-80">Every account counts the same, whatever its plan. Accounts you turned off are left out.</div>
+        <div className="opacity-80">Every account counts the same, whatever its plan. Turned-off and signed-out accounts are left out.</div>
       </TooltipContent>
     </Tooltip>
   )

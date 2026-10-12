@@ -42,15 +42,17 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
   const setOpen = useAccountParam(account, credentials.data?.files)
   const [modelsFor, setModelsFor] = useState<Credential | null>(null)
-  // The pool the forecast counts: accounts on, and those the console holds back, other than signed-out ones.
+  // The pool the forecast counts: accounts on, and those the console holds back, other than signed-out
+  // ones. Which accounts are held is only known once the reserve status is in.
   const pools = poolWeekly(
-    accounts
-      .filter((c) => ['claude', 'codex'].includes(c.provider))
-      .filter((c) => {
-        const hold = reserve.data?.accounts[c.name]
-        return !c.disabled || (!!hold && hold.reason !== 'signed-out')
-      })
-      .map((c) => ({ provider: c.provider, reading: accountReadings(c.quota, stored.data?.[c.name]).reading })),
+    reserve.data
+      ? accounts.flatMap((c) => {
+          const hold = reserve.data.accounts[c.name]
+          if (!PROVIDER_ORDER.includes(c.provider) || (c.disabled && (!hold || hold.reason === 'signed-out'))) return []
+          const weeklyHold = hold && (hold.windows as string[]).some((w) => w === 'weekly' || w === 'Weekly') ? hold.until : undefined
+          return [{ provider: c.provider, reading: accountReadings(c.quota, stored.data?.[c.name]).reading, weeklyHold }]
+        })
+      : [],
     now,
   ).filter((p) => p.accounts > 1)
 

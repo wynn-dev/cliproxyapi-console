@@ -25,25 +25,26 @@ export interface PoolWeekly {
 
 /**
  * Every account's weekly limit of a provider added up, each account counting the same whatever its
- * plan, like the run-out forecast. Accounts turned off by hand are left out, accounts held back by
- * the console stay in; accounts that haven't reported their limits yet count as unused.
+ * plan, like the run-out forecast. Accounts that haven't reported their limits yet count as unused;
+ * a reading without the weekly window leaves the account out, unless the reserve holds it for that
+ * window (`weeklyHold`, when the hold ends), which counts it as used up.
  */
-export function poolWeekly(accounts: { provider: string; reading?: LimitReading }[], now: number): PoolWeekly[] {
+export function poolWeekly(accounts: { provider: string; reading?: LimitReading; weeklyHold?: number }[], now: number): PoolWeekly[] {
   const out = new Map<string, PoolWeekly>()
-  for (const { provider, reading } of accounts) {
+  for (const { provider, reading, weeklyHold } of accounts) {
     const p = out.get(provider) ?? { provider, accounts: 0, left: 0, unread: 0 }
+    const w = limitWindows(provider, reading, now).find((w) => w.label === 'Weekly')
+    const window = w ?? (!hasReading(reading) ? { left: 1, resetsAt: undefined } : weeklyHold !== undefined ? { left: 0, resetsAt: weeklyHold || undefined } : undefined)
+    if (!window) continue
     out.set(provider, p)
     p.accounts++
-    const w = limitWindows(provider, reading, now).find((w) => w.label === 'Weekly')
-    if (!w) {
-      p.left++
-      p.unread++
-      continue
-    }
-    p.left += w.left
-    if (w.resetsAt === undefined) continue
-    if (!p.nextReset || w.resetsAt < p.nextReset.at) p.nextReset = { at: w.resetsAt, gain: 1 - w.left }
-    else if (w.resetsAt === p.nextReset.at) p.nextReset.gain += 1 - w.left
+    p.left += window.left
+    if (!hasReading(reading)) p.unread++
+    // A reset that gives nothing back says nothing about when capacity returns.
+    const gain = 1 - window.left
+    if (window.resetsAt === undefined || gain < 0.005) continue
+    if (!p.nextReset || window.resetsAt < p.nextReset.at) p.nextReset = { at: window.resetsAt, gain }
+    else if (window.resetsAt === p.nextReset.at) p.nextReset.gain += gain
   }
   return [...out.values()]
 }

@@ -126,13 +126,7 @@ function UsagePage() {
               icon={CircleGaugeIcon}
               loading={!s}
               value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'}
-              hint={
-                t?.recovered
-                  ? `${fmtNumber(t.recovered)} succeeded after a failed attempt`
-                  : t
-                    ? `${fmtNumber(t.requests - t.failed)} succeeded`
-                    : undefined
-              }
+              hint={t && `${fmtNumber(t.requests - t.failed)} succeeded${t.recovered ? `, ${fmtNumber(t.recovered)} after a retry` : ''}`}
             />
             <StatCard
               label="Turned away"
@@ -216,10 +210,14 @@ function ValueHint({ summary, labels }: { summary: UsageSummary; labels: Credent
       </TooltipTrigger>
       <TooltipContent className="max-w-80 space-y-1.5">
         <p>
-          What this traffic would have cost at the providers' public API prices as of {PRICES_AS_OF}, with cache reads and writes priced
-          as such. Subscriptions are not billed this way.
+          What this traffic would have cost at the providers' public API prices as of {PRICES_AS_OF}. Claude fast mode counts at the
+          standard price and cache writes at the 5-minute rate, so the real figure would be at least this.
         </p>
-        {missing.length > 0 && <p>No price for {missing.join(', ')}, so {fmtCompact(summary.totals.unpricedTokens)} tokens are left out.</p>}
+        {missing.length > 0 && (
+          <p>
+            No price for {missing.join(', ')} (or its service tier), so {fmtCompact(summary.totals.unpricedTokens)} tokens are left out.
+          </p>
+        )}
       </TooltipContent>
     </Tooltip>
   )

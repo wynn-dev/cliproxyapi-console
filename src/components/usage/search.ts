@@ -74,6 +74,7 @@ export const bucketName = (ms: number) => BUCKET_NAMES[ms] ?? ''
 export function turnedAwayReason(reason: string) {
   if (reason === 'cooldown') return 'Every account was cooling down'
   if (reason === 'no_account') return 'No account available for this model'
+  if (reason === 'unknown_model') return 'No account offers this model'
   if (reason === 'client_key') return 'Client key not accepted'
   return 'Rejected before reaching an account'
 }

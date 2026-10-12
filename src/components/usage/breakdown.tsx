@@ -28,6 +28,9 @@ const DIMENSIONS: { id: Dimension; label: string; data: keyof UsageSummary; filt
   { id: 'provider', label: 'Provider', data: 'byProvider', filter: 'provider' },
 ]
 
+/** Columns that make way on narrower screens, so Share stays in view. */
+const HIDDEN: Record<string, string> = { avgLatency: 'max-2xl:hidden', total: 'max-2xl:hidden' }
+
 const num = (v: number) => (
   <span className="tabular" title={fmtNumber(v)}>
     {fmtCompact(v)}
@@ -39,7 +42,8 @@ export function Breakdown({ summary, labels }: { summary: UsageSummary; labels: 
   const navigate = usageRoute.useNavigate()
   const d = DIMENSIONS.find((x) => x.id === dim)!
   const rows = summary[d.data] as Row[]
-  const totalRequests = summary.totals.requests
+  // Credentials count attempts, so their share is of all attempts.
+  const totalRequests = dim === 'credential' ? summary.totals.attempts : summary.totals.requests
 
   const apply = (row: Row) => {
     if (!row.key) return
@@ -185,7 +189,7 @@ function BreakdownTable({
               const sorted = h.column.getIsSorted()
               const numeric = h.column.id !== 'name'
               return (
-                <TableHead key={h.id} className={cn(numeric && 'text-right', h.column.id === 'avgLatency' && 'max-2xl:hidden')} aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : undefined}>
+                <TableHead key={h.id} className={cn(numeric && 'text-right', HIDDEN[h.column.id])} aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : undefined}>
                   <button
                     type="button"
                     className={cn(
@@ -218,7 +222,7 @@ function BreakdownTable({
               {row.getVisibleCells().map((cell) => (
                 <TableCell
                   key={cell.id}
-                  className={cn(cell.column.id !== 'name' && 'text-right', cell.column.id === 'share' && 'w-px', cell.column.id === 'avgLatency' && 'max-2xl:hidden')}
+                  className={cn(cell.column.id !== 'name' && 'text-right', cell.column.id === 'share' && 'w-px', HIDDEN[cell.column.id])}
                 >
                   <div className={cn(cell.column.id === 'share' && 'flex justify-end')}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</div>
                 </TableCell>

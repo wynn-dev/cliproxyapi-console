@@ -72,7 +72,7 @@ export function RecentRequests({
                   <TableHead>Time</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Credential</TableHead>
-                  <TableHead className="max-2xl:hidden">Client key</TableHead>
+                  <TableHead className="max-2xl:hidden" title="The client key, or the address when there is none">Client</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Latency</TableHead>
                   <TableHead className="text-right">Tokens in → out</TableHead>
@@ -103,7 +103,7 @@ export function RecentRequests({
                       )}
                     </TableCell>
                     <TableCell className="max-2xl:hidden">
-                      <ClientKey value={r.apiKey} />
+                      {r.apiKey ? <ClientKey value={r.apiKey} /> : <span className="font-mono text-[13px] text-muted-foreground">{r.clientIp || '—'}</span>}
                     </TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">

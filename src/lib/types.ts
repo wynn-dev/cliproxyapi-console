@@ -115,7 +115,7 @@ export interface UsageSummary {
 }
 
 /** A turned-away reason, as the server's access-log.ts classifies it. */
-export type TurnedAwayReason = 'cooldown' | 'no_account' | 'client_key' | ''
+export type TurnedAwayReason = 'cooldown' | 'no_account' | 'unknown_model' | 'client_key' | ''
 
 /** An upstream attempt, or a turned-away request (turnedAway 1, negative id, no credential or tokens). */
 export interface UsageRequest {

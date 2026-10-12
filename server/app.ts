@@ -107,6 +107,51 @@ app.post('/console/api/setup', async (c) => {
   return c.json({ status: 'ok' })
 })
 
+// --- Public: health check for uptime monitors ------------------------------------------------
+
+/** CPA drops queued usage records after an hour, so warn well before that. */
+const USAGE_STALE_MS = 10 * 60_000
+
+/**
+ * 200 while CPA is running and answered its last liveness check, 503 otherwise. Unauthenticated, so
+ * it only reports cached states and times: no keys, paths or account names, and no calls to CPA.
+ */
+app.get('/console/health', (c) => {
+  const p = supervisor
+  const answering = p.state === 'running' && p.lastCheck?.ok === true
+  const status = !configExists()
+    ? 'not-set-up'
+    : !installedVersion()
+      ? 'not-installed'
+      : p.state === 'running'
+        ? answering
+          ? 'ok'
+          : 'unresponsive'
+        : p.state
+  // Nothing to collect while CPA is down; otherwise count from the later of the last sync and CPA's start.
+  const syncedOrStarted = Math.max(collector.lastPollAt, (p.state === 'running' && p.startedAt) || 0)
+  const iso = (ms: number | undefined) => (ms ? new Date(ms).toISOString() : null)
+  c.header('Cache-Control', 'no-store')
+  return c.json(
+    {
+      status,
+      consoleVersion: pkg.version,
+      cpa: {
+        state: p.state,
+        uptimeSeconds: p.state === 'running' && p.startedAt ? Math.round((Date.now() - p.startedAt) / 1000) : null,
+        restarts: p.restarts,
+        lastCheck: p.lastCheck ? { ok: p.lastCheck.ok, at: iso(p.lastCheck.at) } : null,
+        lastUnresponsiveRestartAt: iso(p.lastHangAt),
+      },
+      usage: {
+        lastSyncAt: iso(collector.lastPollAt),
+        stale: p.state === 'running' && Date.now() - syncedOrStarted > USAGE_STALE_MS,
+      },
+    },
+    status === 'ok' ? 200 : 503,
+  )
+})
+
 // --- Authenticated --------------------------------------------------------------------------
 
 app.use('/console/api/*', async (c, next) => {

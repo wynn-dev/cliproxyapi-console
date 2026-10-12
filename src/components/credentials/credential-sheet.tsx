@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { BoxesIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
+import { BoxesIcon, ChevronRightIcon, DownloadIcon, RefreshCwIcon, ShieldIcon, TimerResetIcon, Trash2Icon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CopyButton, RequestSparkline, StatusDot } from '@/components/common'
+import { CopyButton, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
+import { AccountMeters } from '@/components/limit-meter'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,8 +17,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useNow } from '@/hooks/use-now'
 import { consoleApi, mgmt } from '@/lib/api'
-import { fmtAgo, fmtBytes, fmtDateTime, fmtNumber, fmtPercent } from '@/lib/format'
+import { fmtAgo, fmtBytes, fmtDateTime } from '@/lib/format'
+import { hasReading } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { Credential, OrderPlacement, OrderStatus } from '@/lib/types'
@@ -38,6 +41,7 @@ import {
   useSetDisabled,
   useTicker,
 } from './lib'
+import { AccountRequests } from './account-requests'
 import { Countdown } from './status'
 
 export function CredentialSheet({
@@ -92,8 +96,11 @@ function SheetBody({
   const meta = STATE_META[state]
   const cooling = state === 'cooling' || (c.cooldowns?.length ?? 0) > 0
   const until = cooling ? cooldownUntil(c) : null
-  const total = c.success + c.failed
-  const signals = Object.entries(c.quota?.signals ?? {})
+  const now = useNow(30_000)
+  const stored = useQuery(queries.limits()).data
+  // CPA forgets readings when it restarts; the console keeps the last one.
+  const reading = hasReading(c.quota) ? c.quota : stored?.[c.name]
+  const signals = Object.entries(reading?.signals ?? {})
   // The list endpoint doesn't echo prefix/proxy_url, so read them from the file; only those two fields are kept.
   const fileFields = useQuery({
     queryKey: ['mgmt', 'credentials', 'file-fields', c.name],
@@ -239,32 +246,29 @@ function SheetBody({
           </Section>
         )}
 
-        <Section title="Traffic" hint="Since CLIProxyAPI started">
-          <div className="grid grid-cols-3 gap-2">
-            <MiniStat label="Requests" value={fmtNumber(total)} />
-            <MiniStat label="Failed" value={fmtNumber(c.failed)} />
-            <MiniStat label="Success rate" value={total ? fmtPercent(c.success / total) : '—'} />
-          </div>
-          <div className="space-y-1.5 rounded-lg border p-3">
-            <RequestSparkline buckets={c.recent_requests} className="h-16 [&>div]:w-auto [&>div]:flex-1" />
-            <div className="flex justify-between text-xs text-muted-foreground tabular">
-              <span>{c.recent_requests[0]?.time.split('-')[0]}</span>
-              <span>Last 200 minutes</span>
-              <span>{c.recent_requests.at(-1)?.time.split('-')[1]}</span>
-            </div>
-          </div>
+        <Section title="Limits" hint={reading?.observed_at ? `Reported ${fmtAgo(reading.observed_at)}` : undefined}>
+          <AccountMeters account={c} reading={reading} reserve={reserve} now={now} detailed />
+          {signals.length > 0 && (
+            <details className="group text-xs">
+              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />
+                Raw headers
+              </summary>
+              <dl className="mt-2 divide-y rounded-lg border">
+                {signals.map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between gap-4 px-3 py-1.5">
+                    <dt className="truncate font-mono text-muted-foreground">{k}</dt>
+                    <dd className="truncate font-mono tabular">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
         </Section>
 
-        {signals.length > 0 && (
-          <Section title="Quota signals" hint={c.quota?.observed_at ? `Observed ${fmtAgo(c.quota.observed_at)}` : undefined}>
-            <dl className="divide-y rounded-lg border text-sm">
-              {signals.map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between gap-4 px-3 py-1.5">
-                  <dt className="truncate font-mono text-xs text-muted-foreground">{k}</dt>
-                  <dd className="truncate font-mono text-xs tabular">{v}</dd>
-                </div>
-              ))}
-            </dl>
+        {c.auth_index && (
+          <Section title="Requests" hint="Last 24 hours">
+            <AccountRequests authIndex={c.auth_index} />
           </Section>
         )}
 
@@ -309,15 +313,6 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
       </div>
       {children}
     </section>
-  )
-}
-
-function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold tracking-tight tabular">{value}</div>
-    </div>
   )
 }
 

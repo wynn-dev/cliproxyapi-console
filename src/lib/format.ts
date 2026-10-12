@@ -57,6 +57,17 @@ export function fmtWhen(date: string | number | Date) {
   return new Date(date).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+const usd0 = new Intl.NumberFormat('en', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+const usd2 = new Intl.NumberFormat('en', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** Dollars: whole above $1,000, cents below. `small` shows two significant digits under a cent. */
+export function fmtUsd(n: number | null | undefined, small = false) {
+  if (n == null || Number.isNaN(n)) return '—'
+  if (n >= 1000) return usd0.format(n)
+  if (n >= 0.01 || n === 0) return usd2.format(n)
+  return small ? `$${n.toPrecision(2)}` : '<$0.01'
+}
+
 /** Shows the first and last few characters of a secret. */
 export function maskSecret(s: string, visible = 4) {
   if (!s) return ''

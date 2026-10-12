@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { fmtCompact, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
+import { fmtCompact, fmtMs, fmtNumber, fmtPercent, fmtUsd } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import type { UsageMetrics, UsageSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -51,7 +51,10 @@ export function Breakdown({ summary, labels }: { summary: UsageSummary; labels: 
     <Card>
       <CardHeader>
         <CardTitle>Breakdown</CardTitle>
-        <CardDescription>Select a row to filter the whole page by it.</CardDescription>
+        <CardDescription>
+          {dim === 'credential' && 'Accounts count every attempt, so a request that failed over shows on each account it tried. '}
+          Select a row to filter the whole page by it.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <Tabs value={dim} onValueChange={(v) => setDim(v as Dimension)}>
@@ -98,7 +101,11 @@ function BreakdownTable({
           return <span className="block max-w-52 truncate font-mono text-[13px]" title={r.key}>{r.key}</span>
         },
       },
-      { accessorKey: 'requests', header: 'Requests', cell: ({ getValue }) => <span className="tabular">{fmtNumber(getValue<number>())}</span> },
+      {
+        accessorKey: 'requests',
+        header: dim === 'credential' ? 'Attempts' : 'Requests',
+        cell: ({ getValue }) => <span className="tabular">{fmtNumber(getValue<number>())}</span>,
+      },
       {
         id: 'success',
         accessorFn: (r) => (r.requests ? 1 - r.failed / r.requests : 0),
@@ -106,7 +113,11 @@ function BreakdownTable({
         cell: ({ row: { original: r } }) => (
           <div className="tabular">
             {fmtPercent(r.requests ? 1 - r.failed / r.requests : null)}
-            {r.failed > 0 && <div className="text-xs text-muted-foreground">{fmtNumber(r.failed)} failed</div>}
+            {r.failed > 0 && (
+              <div className="text-xs text-muted-foreground">
+                {fmtNumber(r.failed)} failed{r.turnedAway > 0 && ` (${fmtNumber(r.turnedAway)} turned away)`}
+              </div>
+            )}
           </div>
         ),
       },
@@ -114,6 +125,19 @@ function BreakdownTable({
       { accessorKey: 'output', header: 'Output', cell: ({ getValue }) => num(getValue<number>()) },
       { accessorKey: 'cached', header: 'Cached', cell: ({ getValue }) => num(getValue<number>()) },
       { accessorKey: 'total', header: 'Total', cell: ({ getValue }) => num(getValue<number>()) },
+      {
+        accessorKey: 'value',
+        header: 'Value',
+        cell: ({ row: { original: r } }) =>
+          r.value === 0 && r.unpricedTokens > 0 ? (
+            <span className="text-muted-foreground">No price</span>
+          ) : (
+            <span className="tabular" title={r.unpricedTokens ? `${fmtNumber(r.unpricedTokens)} tokens have no price and are left out` : 'At public API prices'}>
+              {fmtUsd(r.value)}
+              {r.unpricedTokens > 0 && <span className="text-muted-foreground">*</span>}
+            </span>
+          ),
+      },
       {
         accessorKey: 'avgLatency',
         header: 'Avg latency',
@@ -161,7 +185,7 @@ function BreakdownTable({
               const sorted = h.column.getIsSorted()
               const numeric = h.column.id !== 'name'
               return (
-                <TableHead key={h.id} className={cn(numeric && 'text-right')} aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : undefined}>
+                <TableHead key={h.id} className={cn(numeric && 'text-right', h.column.id === 'avgLatency' && 'max-2xl:hidden')} aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : undefined}>
                   <button
                     type="button"
                     className={cn(
@@ -192,7 +216,10 @@ function BreakdownTable({
               onKeyDown={(e) => e.key === 'Enter' && onSelect(row.original)}
             >
               {row.getVisibleCells().map((cell) => (
-                <TableCell key={cell.id} className={cn(cell.column.id !== 'name' && 'text-right', cell.column.id === 'share' && 'w-px')}>
+                <TableCell
+                  key={cell.id}
+                  className={cn(cell.column.id !== 'name' && 'text-right', cell.column.id === 'share' && 'w-px', cell.column.id === 'avgLatency' && 'max-2xl:hidden')}
+                >
                   <div className={cn(cell.column.id === 'share' && 'flex justify-end')}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</div>
                 </TableCell>
               ))}

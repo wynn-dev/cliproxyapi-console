@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { ChartNoAxesColumnIcon, CircleGaugeIcon, CoinsIcon, EllipsisIcon, TimerIcon, Trash2Icon, TriangleAlertIcon, ZapIcon } from 'lucide-react'
+import { BadgeDollarSignIcon, BanIcon, ChartNoAxesColumnIcon, CircleGaugeIcon, CoinsIcon, EllipsisIcon, TimerIcon, Trash2Icon, TriangleAlertIcon, ZapIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { LatencyChart, RequestsChart, TokensChart } from '@/components/usage-charts'
 import { Breakdown } from '@/components/usage/breakdown'
+import type { CredentialLabels } from '@/components/usage/cells'
 import { UsageFilterBar } from '@/components/usage/filter-bar'
 import { RecentRequests } from '@/components/usage/recent-requests'
 import { DEFAULT_RANGE, RANGES, bucketName, filterParams, hasFilters, validateUsageSearch } from '@/components/usage/search'
@@ -20,8 +21,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
 import { consoleApi } from '@/lib/api'
-import { fmtAgo, fmtCompact, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
+import { fmtAgo, fmtCompact, fmtMs, fmtNumber, fmtPercent, fmtUsd } from '@/lib/format'
+import { PRICES_AS_OF } from '@/lib/prices'
 import { queries, useConfigWrite, useCredentialLabels, usageQueries } from '@/lib/queries'
+import type { UsageSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export const Route = createFileRoute('/_app/usage')({ validateSearch: validateUsageSearch, component: UsagePage })
@@ -55,7 +58,7 @@ function UsagePage() {
     <>
       <PageHeader
         title="Usage"
-        description="Every request that went through the proxy, kept by this console."
+        description="Every request that went through the proxy, kept by this console. A request counts once, however many accounts it tried."
         actions={
           <>
             <CollectorHealth />
@@ -110,7 +113,7 @@ function UsagePage() {
         </Empty>
       ) : (
         <div className={cn('space-y-6 transition-opacity', refreshing && 'opacity-60')}>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 max-sm:gap-3 lg:grid-cols-3">
             <StatCard
               label="Requests"
               icon={ZapIcon}
@@ -123,7 +126,27 @@ function UsagePage() {
               icon={CircleGaugeIcon}
               loading={!s}
               value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'}
-              hint={t ? `${fmtNumber(t.requests - t.failed)} succeeded` : undefined}
+              hint={
+                t?.recovered
+                  ? `${fmtNumber(t.recovered)} succeeded after a failed attempt`
+                  : t
+                    ? `${fmtNumber(t.requests - t.failed)} succeeded`
+                    : undefined
+              }
+            />
+            <StatCard
+              label="Turned away"
+              icon={BanIcon}
+              loading={!s}
+              value={fmtNumber(t?.turnedAway)}
+              hint={<TurnedAwayHint turnedAway={t?.turnedAway ?? 0} />}
+            />
+            <StatCard
+              label="Value at API prices"
+              icon={BadgeDollarSignIcon}
+              loading={!s}
+              value={t ? (t.value === 0 && t.unpricedTokens > 0 ? 'No price' : fmtUsd(t.value)) : '—'}
+              hint={t && <ValueHint summary={s} labels={labels} />}
             />
             <StatCard
               label="Tokens"
@@ -159,6 +182,46 @@ function UsagePage() {
 
       {!(s && t?.requests === 0) && <RecentRequests rangeMs={rangeMs} filters={filters} enabled={ready} labels={labels} />}
     </>
+  )
+}
+
+function TurnedAwayHint({ turnedAway }: { turnedAway: number }) {
+  const { data } = useQuery(queries.status())
+  const error = data?.collector.accessLogError
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className={cn('cursor-default', error && 'text-warning')}>
+          {error ? 'Not tracked right now' : turnedAway ? 'Never reached an account' : 'None in this range'}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">
+        {error ??
+          'Requests CLIProxyAPI refused before trying any account, for example because every account was cooling down or held back. They count as failed requests.'}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** "alice@example.com served $2,140" for the top credential, with how the value is worked out on hover. */
+function ValueHint({ summary, labels }: { summary: UsageSummary; labels: CredentialLabels }) {
+  const top = summary.byCredential.reduce<UsageSummary['byCredential'][number] | undefined>((a, b) => (b.value > (a?.value ?? 0) ? b : a), undefined)
+  const missing = summary.totals.unpricedModels
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="cursor-default">
+          {top && summary.byCredential.length > 1 ? `${labels.get(top.key)?.label ?? 'One account'} served ${fmtUsd(top.value)}` : `List prices as of ${PRICES_AS_OF}`}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-80 space-y-1.5">
+        <p>
+          What this traffic would have cost at the providers' public API prices as of {PRICES_AS_OF}, with cache reads and writes priced
+          as such. Subscriptions are not billed this way.
+        </p>
+        {missing.length > 0 && <p>No price for {missing.join(', ')}, so {fmtCompact(summary.totals.unpricedTokens)} tokens are left out.</p>}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 

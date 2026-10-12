@@ -22,7 +22,7 @@ export interface UsageSearch {
   provider?: string
   credential?: string
   key?: string
-  status?: 'ok' | 'failed'
+  status?: 'ok' | 'failed' | 'turned_away'
 }
 
 export type FilterKey = Exclude<keyof UsageSearch, 'range'>
@@ -39,7 +39,7 @@ export function validateUsageSearch(s: Record<string, unknown>): UsageSearch {
     provider: str(s.provider),
     credential: str(s.credential),
     key: str(s.key),
-    status: s.status === 'ok' || s.status === 'failed' ? s.status : undefined,
+    status: s.status === 'ok' || s.status === 'failed' || s.status === 'turned_away' ? s.status : undefined,
   }
 }
 
@@ -69,3 +69,11 @@ const BUCKET_NAMES: Record<number, string> = {
   86_400_000: 'per day',
 }
 export const bucketName = (ms: number) => BUCKET_NAMES[ms] ?? ''
+
+/** Why CPA turned a request away, from the reason server/access-log.ts records. */
+export function turnedAwayReason(reason: string) {
+  if (reason === 'cooldown') return 'Every account was cooling down'
+  if (reason === 'no_account') return 'No account available for this model'
+  if (reason === 'client_key') return 'Client key not accepted'
+  return 'Rejected before reaching an account'
+}

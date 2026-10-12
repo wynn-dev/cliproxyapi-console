@@ -20,10 +20,13 @@ function timeAxis(series: UsagePoint[], bucketMs: number) {
 const requestsConfig = {
   ok: { label: 'Succeeded', color: 'var(--chart-1)' },
   failed: { label: 'Failed', color: 'var(--critical)' },
+  turnedAway: { label: 'Turned away', color: 'var(--warning)' },
 } satisfies ChartConfig
 
+/** Client requests: failed ones were tried and failed, turned-away ones never reached an account. */
 export function RequestsChart({ series, bucketMs, className }: { series: UsagePoint[]; bucketMs: number; className?: string }) {
-  const data = series.map((p) => ({ t: p.t, ok: p.requests - p.failed, failed: p.failed }))
+  const data = series.map((p) => ({ t: p.t, ok: p.requests - p.failed, failed: p.failed - p.turnedAway, turnedAway: p.turnedAway }))
+  const anyTurnedAway = series.some((p) => p.turnedAway > 0)
   return (
     <ChartContainer config={requestsConfig} className={className ?? 'aspect-auto h-64 w-full'}>
       <BarChart data={data} barCategoryGap="15%" maxBarSize={24} margin={{ left: 0, right: 0, top: 4 }}>
@@ -35,14 +38,20 @@ export function RequestsChart({ series, bucketMs, className }: { series: UsagePo
           content={<ChartTooltipContent labelFormatter={(_, p) => bucketLabel(p?.[0]?.payload.t, bucketMs)} />}
         />
         <ChartLegend content={<ChartLegendContent />} />
+        {/* Round only the topmost segment of each bar. */}
         <Bar
           dataKey="ok"
           stackId="r"
           fill="var(--color-ok)"
-          // Round the top only when no failed segment sits on it.
-          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.failed ? 0 : [3, 3, 0, 0]} />}
+          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.failed || p.payload.turnedAway ? 0 : [3, 3, 0, 0]} />}
         />
-        <Bar dataKey="failed" stackId="r" fill="var(--color-failed)" radius={[3, 3, 0, 0]} />
+        <Bar
+          dataKey="failed"
+          stackId="r"
+          fill="var(--color-failed)"
+          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.turnedAway ? 0 : [3, 3, 0, 0]} />}
+        />
+        {anyTurnedAway && <Bar dataKey="turnedAway" stackId="r" fill="var(--color-turnedAway)" radius={[3, 3, 0, 0]} />}
       </BarChart>
     </ChartContainer>
   )

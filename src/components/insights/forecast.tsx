@@ -58,7 +58,7 @@ function PoolRow({ pool: p, now, reserve }: { pool: PoolForecast; now: number; r
       </div>
       {w.status !== 'learning' && (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-          <Fact label="Left above the reserve" value={fmtAccounts(w.left)} hint={`Weekly limits of the accounts in the pool, counted down to the ${reserve}% reserve.`} />
+          <Fact label="Left above the reserve" value={fmtAccounts(w.left)} hint={`Weekly limits of the accounts in the pool, counted down to the ${reserve}% reserve. Accounts that haven't reported yet count as their whole limit.`} />
           {hasPace && (
             <Fact
               label="Pace"

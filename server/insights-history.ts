@@ -11,7 +11,8 @@ export interface ProviderAccount {
   priority: number
   /**
    * Whether the provider can draw on it: enabled, or held back by the console until a reset. An
-   * account disabled by hand is out of the pool, though its use still counts towards the pace.
+   * account disabled by hand, or held until someone signs it in again, is out of the pool, though
+   * its use still counts towards the pace.
    */
   inPool: boolean
 }
@@ -22,7 +23,8 @@ export function accounts() {
   const out = new Map<string, ProviderAccount[]>(POOL_PROVIDERS.map((p) => [p, []]))
   for (const c of listedCredentials()) {
     if (!c.provider || !out.has(c.provider)) continue
-    out.get(c.provider)!.push({ name: c.name, priority: c.priority ?? 0, inPool: !c.disabled || !!held[c.name] })
+    const hold = held[c.name]
+    out.get(c.provider)!.push({ name: c.name, priority: c.priority ?? 0, inPool: !c.disabled || (!!hold && hold.reason !== 'signed-out') })
   }
   return out
 }
@@ -89,14 +91,16 @@ const STEP = 5 * 60_000
 /**
  * Time in [from, to) the pool was dry: every account that had a reading by then at its reserve or
  * limit. An account only counts from its first sample, so history needs the sample before `from`.
- * `stretches` are the dry spans themselves, [start, end) in ms.
+ * Accounts in `unused` without any sample (with fill-first, ones that never served) count as free
+ * throughout. `stretches` are the dry spans themselves, [start, end) in ms.
  */
-export function dryTime(names: string[], history: ReturnType<typeof byAccount>, reserve: Record<ReserveWindow, number>, from: number, to: number) {
+export function dryTime(names: string[], history: ReturnType<typeof byAccount>, reserve: Record<ReserveWindow, number>, from: number, to: number, unused: string[] = []) {
+  const neverRead = unused.some((name) => KINDS.every((kind) => !history.get(name)?.[kind]?.length))
   const out = { dryMs: 0, longestDryMs: 0, dryStretches: 0, stretches: [] as [number, number][] }
   let stretch = 0
   for (let t = from; t < to; t += STEP) {
-    let known = false
-    let free = false
+    let known = neverRead
+    let free = neverRead
     for (const name of names) {
       const windows = KINDS.map((kind) => ({ kind, s: sampleAt(history.get(name)?.[kind], t) })).filter((w) => w.s)
       if (!windows.length) continue

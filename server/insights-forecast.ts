@@ -1,9 +1,9 @@
 import { historyStarts, limitHistory } from './limit-history.ts'
-import { RESERVE_WINDOWS, limitWindows, type ReserveWindow } from './limit-windows.ts'
+import { RESERVE_WINDOWS, hasReading, limitWindows, type ReserveWindow } from './limit-windows.ts'
 import { limitReadings } from './limits.ts'
 import { accounts, byAccount, dryTime, usedSince } from './insights-history.ts'
 import type { ForecastReport, WindowForecast } from './insights-types.ts'
-import { type ReserveLimits, reserveLimits } from './reserve.ts'
+import { type ReserveLimits, reserveLimits, reserveStatus } from './reserve.ts'
 
 /**
  * Run-out forecast: when each provider's pool reaches its reserve if use goes on at the pace of the
@@ -84,7 +84,7 @@ function windowForecast(kind: ReserveWindow, accounts: SimAccount[], read: numbe
   const from = Math.max(now - lookback, first)
   const history = byAccount(limitHistory(from, now + 1, undefined, { previous: true }).filter((s) => names.includes(s.name)))
   // While the pool was dry nothing could be used, so that time says nothing about the pace.
-  const basisMs = Number.isFinite(from) ? now - from - dryTime(pool, history, reserve, from, now).dryMs : 0
+  const basisMs = Number.isFinite(from) ? now - from - dryTime(pool, history, reserve, from, now, pool).dryMs : 0
   if (basisMs < minHistory) return { ...base, status: 'learning', needMs: minHistory - basisMs }
 
   let used = 0
@@ -102,6 +102,7 @@ const STALE_MS = 12 * HOUR
 export function forecast(now = Date.now()): ForecastReport {
   const reserve = reserveLimits()
   const readings = limitReadings()
+  const held = reserveStatus().accounts
   const starts = historyStarts()
   const providers = []
   for (const [provider, all] of accounts()) {
@@ -121,11 +122,15 @@ export function forecast(now = Date.now()): ForecastReport {
       for (const kind of ['weekly', '5h'] as const) {
         const w = windows[kind]
         const full = 1 - reserve[kind] / 100
-        // No reading means the account has served nothing the console saw (with fill-first, an
-        // account further down the order), so its whole limit is still there.
-        const a: SimAccount = w
-          ? { name: m.name, priority: m.priority, left: Math.max(0, w.left - reserve[kind] / 100), full, resetsAt: w.resetsAt }
-          : { name: m.name, priority: m.priority, left: full, full }
+        const hold = held[m.name]
+        let a: SimAccount
+        if (w) a = { name: m.name, priority: m.priority, left: Math.max(0, w.left - reserve[kind] / 100), full, resetsAt: w.resetsAt }
+        // No reading at all: the account served nothing the console saw (with fill-first, one
+        // further down the order), so its whole limit is still there.
+        else if (!hasReading(reading)) a = { name: m.name, priority: m.priority, left: full, full }
+        // A reading can lack a window; the reserve then holds the account until that window resets.
+        else if (hold?.windows.includes(kind)) a = { name: m.name, priority: m.priority, left: 0, full, resetsAt: hold.until }
+        else continue
         // An account held back for its weekly limit has no 5-hour capacity to give either.
         const weekly = sim.weekly.find((s) => s.name === m.name)
         if (kind === '5h' && weekly && weekly.left <= 1e-9) Object.assign(a, { left: 0, full: 0 })

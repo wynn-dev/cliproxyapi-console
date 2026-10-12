@@ -27,7 +27,8 @@ export function digest(now = Date.now()): DigestReport {
   for (const [provider, list] of members) {
     if (!list.length) continue
     const names = list.map((a) => a.name)
-    const { stretches, ...time } = dryTime(names, history, reserve, from, now)
+    const pool = list.filter((a) => a.inPool).map((a) => a.name)
+    const { stretches, ...time } = dryTime(names, history, reserve, from, now, pool)
     dry.push(...stretches)
     pools.push({ provider, accounts: list.length, ...time })
   }

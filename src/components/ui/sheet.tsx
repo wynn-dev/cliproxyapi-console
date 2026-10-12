@@ -56,6 +56,7 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -72,6 +73,11 @@ function SheetContent({
           SIDE[side],
           className
         )}
+        onInteractOutside={(e) => {
+          // Toasts stay clickable over a modal; tapping one must not count as clicking outside it.
+          if ((e.target as HTMLElement | null)?.closest?.("[data-sonner-toaster]")) e.preventDefault()
+          onInteractOutside?.(e)
+        }}
         {...props}
       >
         {children}

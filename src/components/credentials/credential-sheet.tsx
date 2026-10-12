@@ -16,11 +16,11 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { mgmt } from '@/lib/api'
+import { consoleApi, mgmt } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtDateTime, fmtNumber, fmtPercent } from '@/lib/format'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
-import type { Credential, OrderPlacement } from '@/lib/types'
+import type { Credential, OrderPlacement, OrderStatus } from '@/lib/types'
 import {
   STATE_META,
   accountName,
@@ -337,22 +337,19 @@ function Meta({ label, value, copy, title }: { label: string; value: React.React
 
 const ORDERED_PROVIDERS = ['claude', 'codex']
 
-function OrderNote({ placement }: { placement?: OrderPlacement }) {
-  const now = useTicker(!!placement?.weeklyResetsAt, 60_000)
-  const reason = placement && orderReason(placement, now)
+function OrderNote({ placement, affinity }: { placement: OrderPlacement; affinity: boolean }) {
+  const now = useTicker(!!placement.weeklyResetsAt, 60_000)
+  const reason = orderReason(placement, now, affinity)
   return (
     <div className="-mt-1 space-y-0.5 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
-      {reason && (
-        <p>
-          <span className="font-medium text-foreground">{reason.title}.</span> {reason.detail}
-        </p>
-      )}
       <p>
-        Priority is set by{' '}
+        <span className="font-medium text-foreground">{reason.title}.</span> {reason.detail}
+      </p>
+      <p>
         <Link to="/settings" search={{ section: 'routing' }} className="underline underline-offset-4 hover:text-foreground">
-          smart account order
-        </Link>
-        {placement ? `. This account's own priority, ${placement.original}, breaks ties and comes back when it's off.` : '.'}
+          Smart account order
+        </Link>{' '}
+        sorts accounts with the same priority, so CPA sees priority {placement.effective}.
       </p>
     </div>
   )
@@ -400,25 +397,33 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
   const order = useQuery(queries.order()).data
   // Smart account order owns the priority of Claude and Codex accounts while it's on.
   const ordered = !!order?.active && ORDERED_PROVIDERS.includes(credential.provider)
-  const placement = ordered ? order.accounts[credential.name] : undefined
+  // Only enabled accounts are ranked.
+  const placement = ordered && !credential.disabled ? order.accounts[credential.name] : undefined
   const firstRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!autoFocus) return
     firstRef.current?.scrollIntoView({ block: 'center' })
     firstRef.current?.focus()
   }, [autoFocus])
-  const base = toForm(credential)
+  // While ordered, the field edits the account's own priority; CPA holds the value the console derives from it.
+  const own = ordered ? order.own[credential.name] : undefined
+  const base = toForm(own === undefined ? credential : { ...credential, priority: own })
   const [draft, setValues] = useState(base)
   // Until edited here, priority follows the saved value, which smart account order may change.
   const [priorityEdited, setPriorityEdited] = useState(false)
-  const values = ordered || !priorityEdited ? { ...draft, priority: base.priority } : draft
+  const values = priorityEdited ? draft : { ...draft, priority: base.priority }
   const [showErrors, setShowErrors] = useState(false)
   const errors = validate(values)
   const changes = diff(base, values)
   const dirty = Object.keys(changes).length > 0
 
   const save = useMutation({
-    mutationFn: (body: Record<string, unknown>) => mgmt('/credentials/fields', { method: 'PATCH', body: { name: credential.name, ...body } }),
+    mutationFn: async ({ priority, ...body }: Record<string, unknown>) => {
+      if (ordered && priority !== undefined) {
+        qc.setQueryData(queries.order().queryKey, await consoleApi<OrderStatus>('/order/own', { method: 'PUT', body: { name: credential.name, priority } }))
+      } else if (priority !== undefined) body.priority = priority
+      if (Object.keys(body).length) await mgmt('/credentials/fields', { method: 'PATCH', body: { name: credential.name, ...body } })
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['mgmt', 'credentials'] })
       setValues((v) => ({
@@ -459,7 +464,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
       <div className="grid grid-cols-3 gap-3">
         <Field data-invalid={showErrors && !!errors.priority}>
           <FieldLabel htmlFor="cred-priority">Priority</FieldLabel>
-          <Input ref={firstRef} inputMode="numeric" className="tabular" disabled={ordered} {...field('priority')} />
+          <Input ref={firstRef} inputMode="numeric" className="tabular" {...field('priority')} />
           <FieldError>{showErrors && errors.priority}</FieldError>
         </Field>
         <Field data-invalid={showErrors && !!errors.weight}>
@@ -473,7 +478,7 @@ function EditForm({ credential, autoFocus }: { credential: Credential; autoFocus
           <FieldError>{showErrors && errors.request_retry}</FieldError>
         </Field>
       </div>
-      {ordered && <OrderNote placement={placement} />}
+      {placement && <OrderNote placement={placement} affinity={order!.affinity} />}
       <p className="-mt-1 text-xs text-muted-foreground">
         Higher priority is tried first. Weight applies to weighted round-robin. Leave weight or retry empty to use the defaults.
       </p>

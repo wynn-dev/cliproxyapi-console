@@ -71,13 +71,13 @@ export function reserveNote(hold: ReserveHold, limits: ReserveStatus['limits']) 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`
 
 /** Why smart account order put an account where it is, e.g. "Used first" and "its weekly limit resets soonest, in 1d 4h". */
-export function orderReason(p: OrderPlacement, now: number) {
+export function orderReason(p: OrderPlacement, now: number, affinity: boolean) {
   if (p.tier === 'held') {
     const names = (p.windows ?? []).map((w) => WINDOW_NAMES[w]).join(' and ')
-    return { title: 'Held for new conversations', detail: `Its ${names} limit is close to its reserve. Conversations already on it stay.` }
+    return { title: 'Held for new conversations', detail: `Its ${names} limit is close to its reserve.${affinity ? ' Conversations already on it stay.' : ''}` }
   }
   const title = p.rank === 1 ? 'Used first' : `${ordinal(p.rank)} in line`
-  if (p.tier === 'unknown' || p.weeklyResetsAt === undefined) return { title, detail: 'No current weekly reading, so accounts with one go first.' }
+  if (p.tier === 'unknown' || p.weeklyResetsAt === undefined) return { title, detail: 'No weekly reading yet.' }
   const left = fmtDuration(Math.max(0, p.weeklyResetsAt - now))
   return { title, detail: p.rank === 1 ? `Its weekly limit resets soonest, in ${left}.` : `Its weekly limit resets in ${left}.` }
 }

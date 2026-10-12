@@ -44,8 +44,9 @@ export function OrderSection({ onDirty }: { onDirty: DirtyReporter }) {
         description={
           <>
             Accounts whose weekly limit resets soonest go first, so their allowance doesn't expire unused while others run low. An account
-            within 3% of its reserve stops taking new conversations; ones already on it stay, keeping their prompt cache. Turning this
-            off puts back each account's own priority.
+            within 3% of its reserve stops taking new conversations
+            {data?.affinity ? '; ones already on it stay, keeping their prompt cache' : ''}. Otherwise your own priorities still decide:
+            this only reorders accounts with the same priority. Turning it off puts back the priorities you set.
             <Default>on</Default>
           </>
         }

@@ -159,8 +159,12 @@ export interface OrderStatus {
   /** On and the routing strategy is fill first, so the console sets priorities. */
   active: boolean
   strategy: string | null
-  /** Where the console last put each Claude and Codex account, by credential file name. */
+  /** routing.session-affinity: whether conversations stay on their account when it drops. */
+  affinity: boolean
+  /** Where the console last put each enabled Claude and Codex account, by credential file name. */
   accounts: Record<string, OrderPlacement>
+  /** Each managed account's own priority, by credential file name. */
+  own: Record<string, number>
 }
 
 export interface OrderPlacement {
@@ -171,8 +175,11 @@ export interface OrderPlacement {
   of: number
   weeklyResetsAt?: number
   windows?: ReserveWindow[]
-  /** The account's own priority, restored when the feature is turned off. */
+  releaseAt?: number
+  /** The account's own priority, the first sort key; restored when the feature is turned off. */
   original: number
+  /** The priority the console gives it in CPA. */
+  effective: number
 }
 
 // --- CPA management API -------------------------------------------------------------------

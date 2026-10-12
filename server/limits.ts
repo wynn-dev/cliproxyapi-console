@@ -1,6 +1,5 @@
-import { keyMatchesConfig } from './auth.ts'
-import { readState } from './state.ts'
-import { supervisor } from './supervisor.ts'
+import { management } from './management.ts'
+import { applyReserve } from './reserve.ts'
 import { db } from './usage.ts'
 
 /**
@@ -11,8 +10,10 @@ import { db } from './usage.ts'
 
 db.exec('CREATE TABLE IF NOT EXISTS limits (name TEXT PRIMARY KEY, observed_at INTEGER NOT NULL, signals TEXT NOT NULL)')
 
-interface ListedCredential {
+export interface ListedCredential {
   name: string
+  provider?: string
+  disabled?: boolean
   quota?: { observed_at?: string; signals?: Record<string, string> }
 }
 
@@ -22,20 +23,15 @@ const upsert = db.prepare(`
   WHERE excluded.observed_at > limits.observed_at`)
 
 async function record() {
-  const key = readState().managementKey
-  // Never send a stale key: CPA bans 127.0.0.1 (i.e. the console) after five failures.
-  if (supervisor.state !== 'running' || !supervisor.port || !keyMatchesConfig(key)) return
-  const res = await fetch(`http://127.0.0.1:${supervisor.port}/v8/management/credentials`, {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!res.ok) return
+  const res = await management('/credentials')
+  if (!res?.ok) return
   const { files } = (await res.json()) as { files?: ListedCredential[] }
   for (const f of files ?? []) {
     const at = Date.parse(f.quota?.observed_at ?? '')
     const signals = f.quota?.signals ?? {}
     if (at && Object.keys(signals).length) upsert.run(f.name, at, JSON.stringify(signals))
   }
+  return files ?? []
 }
 
 /** The last limit reading per credential file name. */
@@ -44,6 +40,21 @@ export function limitReadings() {
   return Object.fromEntries(rows.map((r) => [r.name, { observed_at: new Date(r.observed_at).toISOString(), signals: JSON.parse(r.signals) as Record<string, string> }]))
 }
 
+/** Often enough that the account reserve stops an account close to its threshold. */
+const POLL_MS = 5_000
+
 export function startLimitRecorder() {
-  setInterval(() => void record().catch(() => {}), 30_000)
+  let busy = false
+  setInterval(async () => {
+    if (busy) return
+    busy = true
+    try {
+      const files = await record()
+      if (files) await applyReserve(files, limitReadings())
+    } catch {
+      // CPA restarting or busy: try again on the next tick.
+    } finally {
+      busy = false
+    }
+  }, POLL_MS)
 }

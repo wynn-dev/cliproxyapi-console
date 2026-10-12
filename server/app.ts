@@ -10,6 +10,7 @@ import { failInstall, installProgress, installRelease, installedVersion, latestR
 import { configExists, readCpaConfig, writeInitialConfig } from './cpa-config.ts'
 import { PACKAGE, defaults, env, paths } from './env.ts'
 import { limitReadings } from './limits.ts'
+import { type ReserveLimits, reserveStatus, setReserveLimits } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { networkAddresses } from './urls.ts'
@@ -146,6 +147,21 @@ app.post('/console/api/process/:action', async (c) => {
 })
 
 app.get('/console/api/limits', (c) => c.json(limitReadings()))
+
+app.get('/console/api/reserve', (c) => c.json(reserveStatus()))
+
+app.put('/console/api/reserve', async (c) => {
+  const body: Partial<Record<keyof ReserveLimits, unknown>> = await c.req.json().catch(() => ({}))
+  const patch: Partial<ReserveLimits> = {}
+  for (const id of ['5h', 'weekly'] as const) {
+    const v = body[id]
+    if (v === undefined) continue
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 90) return c.json({ error: 'Reserve must be a whole percent from 0 to 90' }, 400)
+    patch[id] = v
+  }
+  setReserveLimits(patch)
+  return c.json(reserveStatus())
+})
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))
 

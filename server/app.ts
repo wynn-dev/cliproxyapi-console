@@ -17,6 +17,7 @@ import { limitReadings } from './limits.ts'
 import { fableStatus } from './fable.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
 import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReleaseWhenAllHeld, setReserveLimits } from './reserve.ts'
+import { share, snapshot } from './share.ts'
 import { signInResult, signInWarnings, watchSignIn } from './sign-in.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
@@ -161,6 +162,15 @@ function health(c: Context) {
 app.get('/console/health', health)
 app.get('/console/health/', health)
 
+// --- Public: share card snapshots --------------------------------------------------------------
+
+// Only the PNG itself, by its random id; everything else about sharing stays under /console/api.
+app.get('/console/share/:file', (c) => {
+  const png = snapshot(c.req.param('file'))
+  if (!png) return c.json({ error: 'Not found' }, 404)
+  return c.body(png, 200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' })
+})
+
 // --- Authenticated --------------------------------------------------------------------------
 
 app.use('/console/api/*', async (c, next) => {
@@ -212,6 +222,7 @@ app.get('/console/api/limits/history', (c) => {
 })
 
 app.route('/console/api/insights', insights)
+app.route('/console/api/share', share)
 
 const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), warnings: signInWarnings() })
 

@@ -21,6 +21,8 @@ export interface ConsoleState {
   limitChecks?: boolean
   /** When every account of a provider is held back, release the reserved one with the most left. Off unless true. */
   releaseWhenAllHeld?: boolean
+  /** What the user pays for their plans, USD per month, for the share card. */
+  planPrice?: number
 }
 
 let cached: ConsoleState | undefined

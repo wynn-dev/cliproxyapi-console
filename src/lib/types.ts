@@ -156,6 +156,20 @@ export interface UsageRequest {
   value: number | null
 }
 
+/** The share card's numbers for a time range (server/share.ts). Accounts are auth_index keys, most tokens first. */
+export interface ShareSummary {
+  from: number
+  to: number
+  requests: number
+  tokens: number
+  value: number
+  unpricedTokens: number
+  topModel: { model: string; tokens: number } | null
+  cacheHitRate: number | null
+  accounts: { key: string; tokens: number }[]
+  planPrice: number | null
+}
+
 export interface UsageFacets {
   models: string[]
   providers: string[]

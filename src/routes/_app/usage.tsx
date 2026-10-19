@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { PageHeader, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
+import { ShareButton } from '@/components/share-card'
 import { LatencyChart, RequestsChart, TokensChart } from '@/components/usage-charts'
 import { Breakdown } from '@/components/usage/breakdown'
 import type { CredentialLabels } from '@/components/usage/cells'
@@ -62,6 +63,7 @@ function UsagePage() {
         actions={
           <>
             <CollectorHealth />
+            <ShareButton />
             <HistoryMenu />
           </>
         }

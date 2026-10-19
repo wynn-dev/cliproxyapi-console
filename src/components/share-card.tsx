@@ -16,7 +16,7 @@ import { copyText } from '@/lib/clipboard'
 import { fmtCompact, fmtPercent, fmtUsd } from '@/lib/format'
 import { PRICES_AS_OF } from '@/lib/prices'
 import { useCredentialLabels } from '@/lib/queries'
-import { accountNames, copyPng, renderPng, uploadSnapshot } from '@/lib/share'
+import { accountNames, copyPng, downloadBlob, renderPng, uploadSnapshot } from '@/lib/share'
 import type { ShareSummary } from '@/lib/types'
 
 const WEEK_MS = 7 * 86_400_000
@@ -25,8 +25,8 @@ const MAX_ACCOUNTS = 5
 const plan = new Intl.NumberFormat('en', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
 /** "$200/mo plan → $1,840 of usage this week", or just the usage while no plan price is set. */
-function valueHeadline(value: number, planPrice: number | null) {
-  const usage = `${fmtUsd(value)} of usage this week`
+export function valueHeadline(value: number, planPrice: number | null, period = 'this week') {
+  const usage = `${fmtUsd(value)} of usage ${period}`
   return planPrice ? `${plan.format(planPrice)}/mo plan → ${usage}` : usage
 }
 
@@ -60,40 +60,10 @@ function ShareDialogBody() {
   })
   const labels = useCredentialLabels()
   const [showNames, setShowNames] = useState(false)
-  const [link, setLink] = useState<string>()
-  const [busy, setBusy] = useState<'image' | 'link'>()
+  const [price, setPrice] = useState<number | null>()
+  const share = useShareActions()
   const card = useRef<HTMLDivElement>(null)
-  const s = summary.data
-
-  const copyImage = async () => {
-    setBusy('image')
-    try {
-      const how = await copyPng(renderPng(card.current!), 'cpa-console-week.png')
-      toast.success(how === 'copied' ? 'Image copied to clipboard' : 'Image downloaded', {
-        description: how === 'downloaded' ? 'This browser only copies images on HTTPS or localhost.' : undefined,
-      })
-    } catch (err) {
-      toast.error('Could not copy the image', { description: (err as Error).message })
-    } finally {
-      setBusy(undefined)
-    }
-  }
-
-  const copyLink = async (button: HTMLElement) => {
-    setBusy('link')
-    try {
-      const url = await uploadSnapshot(await renderPng(card.current!))
-      setLink(url)
-      await copyText(url, button).then(
-        () => toast.success('Link copied', { description: url }),
-        () => toast.success('Link ready', { description: url }),
-      )
-    } catch (err) {
-      toast.error('Could not create a link', { description: (err as Error).message })
-    } finally {
-      setBusy(undefined)
-    }
-  }
+  const s = summary.data && { ...summary.data, planPrice: price === undefined ? summary.data.planPrice : price }
 
   if (summary.error) {
     return (
@@ -122,26 +92,36 @@ function ShareDialogBody() {
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Switch id="share-names" checked={showNames} onCheckedChange={setShowNames} />
+          <Switch
+            id="share-names"
+            checked={showNames}
+            onCheckedChange={(v) => {
+              setShowNames(v)
+              share.reset()
+            }}
+          />
           <Label htmlFor="share-names">Show account names</Label>
         </div>
-        {s && <PlanPriceField planPrice={s.planPrice} />}
+        {s && (
+          <PlanPriceField
+            planPrice={s.planPrice}
+            onChange={(v) => {
+              setPrice(v)
+              share.reset()
+            }}
+          />
+        )}
       </div>
 
-      {link && (
-        <div className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm">
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{link}</span>
-          <CopyButton value={link} label="Copy link" />
-        </div>
-      )}
+      <ShareLink link={share.link} />
 
       <DialogFooter>
-        <Button variant="outline" disabled={!s || !!busy} onClick={(e) => copyLink(e.currentTarget)}>
-          {busy === 'link' ? <Spinner /> : <LinkIcon />}
+        <Button variant="outline" disabled={!s || !!share.busy} onClick={(e) => share.copyLink(card.current!, e.currentTarget)}>
+          {share.busy === 'link' ? <Spinner /> : <LinkIcon />}
           Copy link
         </Button>
-        <Button disabled={!s || !!busy} onClick={copyImage}>
-          {busy === 'image' ? <Spinner /> : <ImageIcon />}
+        <Button disabled={!s || !!share.busy} onClick={() => share.copyImage(card.current!, 'cpa-console-week.png')}>
+          {share.busy === 'image' ? <Spinner /> : <ImageIcon />}
           Copy image
         </Button>
       </DialogFooter>
@@ -162,6 +142,7 @@ function WeekCard({ summary: s, names }: { summary: ShareSummary; names: string[
       <div className="space-y-1">
         <div className="text-2xl font-semibold tracking-tight">{valueHeadline(s.value, s.planPrice)}</div>
         <div className="text-xs text-muted-foreground">At public API list prices as of {PRICES_AS_OF}</div>
+        <UnpricedNote summary={s} />
       </div>
       <div className="grid grid-cols-[auto_1fr_auto] gap-3">
         <Stat label="Tokens" value={fmtCompact(s.tokens)} />
@@ -197,8 +178,11 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
   )
 }
 
-/** What the user pays per month, saved on the console. Empty clears it. */
-function PlanPriceField({ planPrice }: { planPrice: number | null }) {
+/**
+ * What the user pays per month, saved on the console. Empty clears it. onChange gets the new price
+ * as soon as it is entered, so an image copied right after already shows it.
+ */
+export function PlanPriceField({ planPrice, onChange }: { planPrice: number | null; onChange: (value: number | null) => void }) {
   const qc = useQueryClient()
   const [draft, setDraft] = useState(planPrice == null ? '' : String(planPrice))
   const save = useMutation({
@@ -213,7 +197,8 @@ function PlanPriceField({ planPrice }: { planPrice: number | null }) {
       toast.error('Enter the plan price in dollars, e.g. 200')
       return
     }
-    save.mutate(value)
+    onChange(value)
+    save.mutate(value, { onError: () => onChange(planPrice) })
   }
   return (
     <div className="space-y-1.5">
@@ -236,6 +221,86 @@ function PlanPriceField({ planPrice }: { planPrice: number | null }) {
           <InputGroupText>{save.isPending ? <Spinner /> : '/mo'}</InputGroupText>
         </InputGroupAddon>
       </InputGroup>
+    </div>
+  )
+}
+
+/**
+ * Copy image, download and copy link for share images. Call reset() whenever what an image shows
+ * changes (names, plan price): the link shown is dropped, and so is one still being made.
+ */
+export function useShareActions() {
+  const [link, setLink] = useState<string>()
+  const [busy, setBusy] = useState<string>()
+  const version = useRef(0)
+
+  const run = async (id: string, fn: () => Promise<void>, failure: string) => {
+    setBusy(id)
+    try {
+      await fn()
+    } catch (err) {
+      toast.error(failure, { description: (err as Error).message })
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  return {
+    link,
+    busy,
+    reset: () => {
+      version.current++
+      setLink(undefined)
+    },
+    copyImage: (node: HTMLElement, filename: string, id = 'image') =>
+      run(
+        id,
+        async () => {
+          const how = await copyPng(renderPng(node), filename)
+          toast.success(how === 'copied' ? 'Image copied to clipboard' : 'Image downloaded', {
+            description: how === 'downloaded' ? 'This browser only copies images on HTTPS or localhost.' : undefined,
+          })
+        },
+        'Could not copy the image',
+      ),
+    download: (node: HTMLElement, filename: string, id = 'download') =>
+      run(id, async () => downloadBlob(await renderPng(node), filename), 'Could not download the image'),
+    copyLink: (node: HTMLElement, button: HTMLElement) => {
+      const started = version.current
+      return run(
+        'link',
+        async () => {
+          const url = await uploadSnapshot(await renderPng(node))
+          if (version.current !== started) return
+          setLink(url)
+          await copyText(url, button).then(
+            () => toast.success('Link copied', { description: url }),
+            () => toast.success('Link ready', { description: url }),
+          )
+        },
+        'Could not create a link',
+      )
+    },
+  }
+}
+
+export function ShareLink({ link }: { link?: string }) {
+  if (!link) return null
+  return (
+    <div className="flex items-center gap-1 rounded-md border px-3 py-1 text-sm">
+      <span className="min-w-0 flex-1 truncate font-mono text-xs">{link}</span>
+      <CopyButton value={link} label="Copy link" />
+    </div>
+  )
+}
+
+/** Which tokens the value leaves out, for want of an API price. Nothing when every token has one. */
+export function UnpricedNote({ summary: s, className = 'text-xs text-muted-foreground' }: { summary: ShareSummary; className?: string }) {
+  if (!s.unpricedTokens) return null
+  const models = s.unpricedModels.length > 3 ? `${s.unpricedModels.slice(0, 3).join(', ')} and ${s.unpricedModels.length - 3} more` : s.unpricedModels.join(', ')
+  return (
+    <div className={className}>
+      No API price for {models || 'some models'}, so {fmtCompact(s.unpricedTokens)} tokens are left out.
     </div>
   )
 }

@@ -164,9 +164,14 @@ export interface ShareSummary {
   tokens: number
   value: number
   unpricedTokens: number
+  unpricedModels: string[]
   topModel: { model: string; tokens: number } | null
+  /** Up to 5, most tokens first. */
+  topModels: { model: string; tokens: number }[]
   cacheHitRate: number | null
   accounts: { key: string; tokens: number }[]
+  /** Tokens per hour, hours with traffic only. */
+  hours: { t: number; tokens: number }[]
   planPrice: number | null
 }
 

@@ -5,7 +5,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { paths } from './env.ts'
 import { readState, updateState } from './state.ts'
-import { usageSummary } from './usage.ts'
+import { db, usageSummary } from './usage.ts'
 
 /** Share card: a summary of a time range and the PNG snapshots the browser renders of it. Mounted behind auth. */
 export const share = new Hono()
@@ -16,11 +16,28 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 /** 128 random bits, hex. The only thing that makes a snapshot's public URL hard to guess. */
 const SNAPSHOT_FILE = /^[0-9a-f]{32}\.png$/
 
-/** What the card shows for [from, to): the last 7 days now, a calendar month for a later recap. */
-export function shareSummary(from: number, to: number) {
+const HOUR = 3_600_000
+
+/**
+ * What the card shows for [from, to): the last 7 days, or a calendar month for the wrapped. tzOffsetMin
+ * (Date.getTimezoneOffset) only aligns the hourly series to the viewer's half and quarter hours.
+ */
+export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
   const s = usageSummary({ from, to }, 0)
   const t = s.totals
-  const topModel = s.byModel.reduce<(typeof s.byModel)[number] | undefined>((a, b) => (b.total > (a?.total ?? 0) ? b : a), undefined)
+  // Straight from the attempts: usageSummary's breakdowns keep the 50 rows with the most requests.
+  const models = db
+    .prepare("SELECT model, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND model != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
+    .all(from, to) as { model: string; tokens: number }[]
+  // By auth_index, most tokens first. The browser resolves names, or masks them.
+  const accounts = db
+    .prepare("SELECT auth_index AS key, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND auth_index != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC")
+    .all(from, to) as { key: string; tokens: number }[]
+  // Tokens per hour, hours with traffic only; the browser adds them up by its own calendar days.
+  const shift = BigInt((((-tzOffsetMin % 60) + 60) % 60) * 60_000)
+  const hours = db
+    .prepare('SELECT ((ts + ?) / ?) * ? - ? AS t, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? GROUP BY 1 ORDER BY 1')
+    .all(shift, BigInt(HOUR), BigInt(HOUR), shift, from, to) as { t: number; tokens: number }[]
   return {
     from,
     to,
@@ -28,17 +45,34 @@ export function shareSummary(from: number, to: number) {
     tokens: t.total,
     value: t.value,
     unpricedTokens: t.unpricedTokens,
-    topModel: topModel ? { model: topModel.key, tokens: topModel.total } : null,
+    unpricedModels: t.unpricedModels,
+    topModel: models[0] ?? null,
+    topModels: models,
     // Cache hit rate = cached input / all input. Input already counts cache reads and writes for
     // every provider (see tokenCounts), so this is cache reads / (uncached + cache reads + cache writes).
     cacheHitRate: t.input ? t.cached / t.input : null,
-    // By auth_index, most tokens first. The browser resolves names, or masks them.
-    accounts: s.byCredential
-      .filter((c) => c.key && c.total > 0)
-      .sort((a, b) => b.total - a.total)
-      .map((c) => ({ key: c.key, tokens: c.total })),
+    accounts,
+    hours,
     planPrice: readState().planPrice ?? null,
   }
+}
+
+/**
+ * Calendar months in the viewer's time zone with any usage, newest first, as "2026-09". The fixed
+ * offset can put an hour by a DST change in the wrong month; the summary itself uses the browser's dates.
+ */
+export function shareMonths(tzOffsetMin: number) {
+  const { first, last } = db.prepare('SELECT MIN(ts) AS first, MAX(ts) AS last FROM requests').get() as { first: number | null; last: number | null }
+  if (first == null || last == null) return []
+  const local = (ms: number) => new Date(ms - tzOffsetMin * 60_000)
+  const any = db.prepare('SELECT 1 FROM requests WHERE ts >= ? AND ts < ? LIMIT 1')
+  const months: string[] = []
+  const end = local(last)
+  for (let d = local(first), y = d.getUTCFullYear(), m = d.getUTCMonth(); y * 12 + m <= end.getUTCFullYear() * 12 + end.getUTCMonth(); m++) {
+    const start = Date.UTC(y, m, 1) + tzOffsetMin * 60_000
+    if (any.get(start, Date.UTC(y, m + 1, 1) + tzOffsetMin * 60_000)) months.unshift(new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7))
+  }
+  return months
 }
 
 share.get('/summary', (c) => {
@@ -47,8 +81,10 @@ share.get('/summary', (c) => {
   const from = q.from ? Number(q.from) : to - 7 * 86_400_000
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return c.json({ error: 'from and to must be times in ms, from before to' }, 400)
   if (to - from > 35 * 86_400_000) return c.json({ error: 'At most 35 days at a time' }, 400)
-  return c.json(shareSummary(from, to))
+  return c.json(shareSummary(from, to, Number(q.tz) || 0))
 })
+
+share.get('/months', (c) => c.json({ months: shareMonths(Number(c.req.query('tz')) || 0) }))
 
 share.get('/plan-price', (c) => c.json({ planPrice: readState().planPrice ?? null }))
 

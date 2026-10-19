@@ -22,6 +22,7 @@ import { Route as AppPlaygroundRouteImport } from './routes/_app/playground'
 import { Route as AppProvidersRouteImport } from './routes/_app/providers'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppUsageRouteImport } from './routes/_app/usage'
+import { Route as AppWrappedRouteImport } from './routes/_app/wrapped'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -87,6 +88,11 @@ const AppUsageRoute = AppUsageRouteImport.update({
   path: '/usage',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWrappedRoute = AppWrappedRouteImport.update({
+  id: '/wrapped',
+  path: '/wrapped',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/providers': typeof AppProvidersRoute
   '/settings': typeof AppSettingsRoute
   '/usage': typeof AppUsageRoute
+  '/wrapped': typeof AppWrappedRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/providers': typeof AppProvidersRoute
   '/settings': typeof AppSettingsRoute
   '/usage': typeof AppUsageRoute
+  '/wrapped': typeof AppWrappedRoute
   '/': typeof AppIndexRoute
 }
 export interface FileRoutesById {
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/_app/providers': typeof AppProvidersRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/usage': typeof AppUsageRoute
+  '/_app/wrapped': typeof AppWrappedRoute
   '/_app/': typeof AppIndexRoute
 }
 export interface FileRouteTypes {
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/providers'
     | '/settings'
     | '/usage'
+    | '/wrapped'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/providers'
     | '/settings'
     | '/usage'
+    | '/wrapped'
     | '/'
   id:
     | '__root__'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/_app/providers'
     | '/_app/settings'
     | '/_app/usage'
+    | '/_app/wrapped'
     | '/_app/'
   fileRoutesById: FileRoutesById
 }
@@ -277,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsageRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/wrapped': {
+      id: '/_app/wrapped'
+      path: '/wrapped'
+      fullPath: '/wrapped'
+      preLoaderRoute: typeof AppWrappedRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -290,6 +309,7 @@ interface AppRouteChildren {
   AppProvidersRoute: typeof AppProvidersRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppUsageRoute: typeof AppUsageRoute
+  AppWrappedRoute: typeof AppWrappedRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -303,6 +323,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppProvidersRoute: AppProvidersRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppUsageRoute: AppUsageRoute,
+  AppWrappedRoute: AppWrappedRoute,
   AppIndexRoute: AppIndexRoute,
 }
 

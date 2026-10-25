@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import type { ApiKeyGroup } from '@/lib/types'
 import { SecretInput } from './inputs'
-import { draftToKey, groupTitle, isCompat, keyToDraft, useSaveGroups, type KeyDraft, type ProviderMeta } from './model'
+import { draftToKey, fallbackNotSaved, groupTitle, isCompat, keyToDraft, useSaveGroups, useSyncFallback, type KeyDraft, type ProviderMeta } from './model'
 
 export interface KeyTarget {
   open: boolean
@@ -21,28 +21,44 @@ export function KeyDialog({
   meta,
   groups,
   target,
+  isFallback,
   onOpenChange,
 }: {
   meta: ProviderMeta
   groups: ApiKeyGroup[]
   target: KeyTarget
+  /** The target group is a fallback, so a key added to it must be one too. */
+  isFallback: boolean
   onOpenChange: (open: boolean) => void
 }) {
   return (
     <Dialog open={target.open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        <KeyForm key={target.session} meta={meta} groups={groups} target={target} onDone={() => onOpenChange(false)} />
+        <KeyForm key={target.session} meta={meta} groups={groups} target={target} isFallback={isFallback} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   )
 }
 
-function KeyForm({ meta, groups, target, onDone }: { meta: ProviderMeta; groups: ApiKeyGroup[]; target: KeyTarget; onDone: () => void }) {
+function KeyForm({
+  meta,
+  groups,
+  target,
+  isFallback,
+  onDone,
+}: {
+  meta: ProviderMeta
+  groups: ApiKeyGroup[]
+  target: KeyTarget
+  isFallback: boolean
+  onDone: () => void
+}) {
   const group = groups[target.group]
   const original = target.key == null ? undefined : group?.keys[target.key]
   const [d, setD] = useState<KeyDraft>(() => keyToDraft(original))
   const [error, setError] = useState<string | null>(null)
   const save = useSaveGroups(meta.id)
+  const fallback = useSyncFallback(meta.id)
   if (!group) return null
   const title = groupTitle(group, meta, target.group)
 
@@ -58,11 +74,14 @@ function KeyForm({ meta, groups, target, onDone }: { meta: ProviderMeta; groups:
     setError(null)
     try {
       await save.mutateAsync(groups.map((g, i) => (i === target.group ? { ...g, keys } : g)))
-      toast.success(original ? 'Key saved' : 'Key added', { description: title })
-      onDone()
     } catch (err) {
-      setError((err as Error).message)
+      return setError((err as Error).message)
     }
+    toast.success(original ? 'Key saved' : 'Key added', { description: title })
+    onDone()
+    await fallback
+      .sync({ keys: [apiKey], removed: original ? [original['api-key']] : [], on: isFallback, was: isFallback })
+      .catch(fallbackNotSaved)
   }
 
   return (

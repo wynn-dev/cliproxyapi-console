@@ -1,4 +1,5 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { consoleApi, mgmt } from '@/lib/api'
 import { API_KEY_PROVIDERS } from '@/lib/providers'
 import type { ApiKeyEntry, ApiKeyGroup, ApiKeysStatus, ApiKeyUsage, V8Config } from '@/lib/types'
@@ -48,20 +49,48 @@ export function useSetFallback(provider: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ keys, on }: { keys: string[]; on: boolean }) =>
-      consoleApi<ApiKeysStatus>('/api-keys/fallback', { method: 'PUT', body: { provider, keys, on } }),
+      consoleApi<ApiKeysStatus | null>('/api-keys/fallback', { method: 'PUT', body: { provider, keys, on } }),
     onSuccess: (data) => {
-      qc.setQueryData(['console', 'api-keys'], data)
+      if (data) qc.setQueryData(['console', 'api-keys'], data)
+      else void qc.invalidateQueries({ queryKey: ['console', 'api-keys'] })
       void qc.invalidateQueries({ queryKey: ['mgmt', 'config'] })
     },
   })
 }
 
+/**
+ * Fallback marks belong to keys, so every change to a fallback group's keys goes through here once
+ * the group is saved: keys that left it lose their mark and the ones in it get the group's setting.
+ * Groups that were never a fallback are left alone, so a "*" the user excluded stays theirs.
+ */
+export function useSyncFallback(provider: string) {
+  const set = useSetFallback(provider)
+  return {
+    isPending: set.isPending,
+    sync: async ({ keys, removed = [], on, was }: { keys: string[]; removed?: string[]; on: boolean; was: boolean }) => {
+      if (!FALLBACK_PROVIDERS.has(provider) || (!on && !was)) return
+      const gone = removed.filter((k) => !keys.includes(k))
+      if (on) {
+        if (was && gone.length) await set.mutateAsync({ keys: gone, on: false })
+        if (keys.length) await set.mutateAsync({ keys, on: true })
+      } else if (keys.length || gone.length) await set.mutateAsync({ keys: [...keys, ...gone], on: false })
+    },
+  }
+}
+
+/** A save that went through while its fallback setting did not: said once, without keeping a form open to resubmit. */
+export const fallbackNotSaved = (err: Error) =>
+  toast.error('Saved, but the fallback setting was not', { description: `${err.message} Open the group and save it again.` })
+
 export function useSetBalance() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ key, balance }: { key: string; balance: number | null }) =>
-      consoleApi<ApiKeysStatus>('/api-keys/balance', { method: 'PUT', body: { key, balance } }),
-    onSuccess: (data) => qc.setQueryData(['console', 'api-keys'], data),
+      consoleApi<ApiKeysStatus | null>('/api-keys/balance', { method: 'PUT', body: { key, balance } }),
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(['console', 'api-keys'], data)
+      else void qc.invalidateQueries({ queryKey: ['console', 'api-keys'] })
+    },
   })
 }
 

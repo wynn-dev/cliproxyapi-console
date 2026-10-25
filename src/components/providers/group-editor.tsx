@@ -19,8 +19,9 @@ import {
   keyToDraft,
   PROVIDER_INFO,
   toDraft,
+  fallbackNotSaved,
   useSaveGroups,
-  useSetFallback,
+  useSyncFallback,
   validateDraft,
   type GroupDraft,
   type ProviderMeta,
@@ -43,8 +44,8 @@ export function GroupEditor({
   meta: ProviderMeta
   groups: ApiKeyGroup[]
   target: EditorTarget
-  /** Whether the group at `index` is a fallback. */
-  isFallback: (index: number) => boolean
+  /** Whether the group at `index` is a fallback; undefined while that isn't known (not loaded, or failed). */
+  isFallback?: (index: number) => boolean
   onOpenChange: (open: boolean) => void
 }) {
   return (
@@ -55,7 +56,8 @@ export function GroupEditor({
           meta={meta}
           groups={groups}
           index={target.index}
-          wasFallback={target.index != null && isFallback(target.index)}
+          fallbackKnown={!!isFallback}
+          wasFallback={target.index != null && !!isFallback?.(target.index)}
           onDone={() => onOpenChange(false)}
         />
       </SheetContent>
@@ -67,12 +69,14 @@ function EditorBody({
   meta,
   groups,
   index,
+  fallbackKnown,
   wasFallback,
   onDone,
 }: {
   meta: ProviderMeta
   groups: ApiKeyGroup[]
   index: number | null
+  fallbackKnown: boolean
   wasFallback: boolean
   onDone: () => void
 }) {
@@ -82,8 +86,9 @@ function EditorBody({
   const [d, setD] = useState<GroupDraft>(() => toDraft(original, provider, wasFallback))
   const [error, setError] = useState<string | null>(null)
   const save = useSaveGroups(provider)
-  const setFallback = useSetFallback(provider)
-  const canFallback = FALLBACK_PROVIDERS.has(provider)
+  const fallback = useSyncFallback(provider)
+  // Without the console's status the switch would show the wrong state, so it is left out.
+  const canFallback = FALLBACK_PROVIDERS.has(provider) && fallbackKnown
   const set = <K extends keyof GroupDraft>(k: K, v: GroupDraft[K]) => setD((prev) => ({ ...prev, [k]: v }))
   const required = PROVIDER_INFO[provider].baseUrlRequired
 
@@ -99,19 +104,15 @@ function EditorBody({
     setError(null)
     try {
       await save.mutateAsync(next)
-      if (canFallback && (d.fallback || wasFallback)) {
-        // Every key that may carry the mark, so turning it off clears them all.
-        const keys = [...new Set([...group.keys, ...(original?.keys ?? [])].map((k) => k['api-key']))]
-        if (keys.length) {
-          await setFallback.mutateAsync({ keys, on: d.fallback }).catch((err: Error) => {
-            throw new Error(`The group was saved, but the fallback setting was not: ${err.message}`)
-          })
-        }
-      }
-      toast.success(index == null ? 'Group added' : 'Group saved', { description: groupTitle(group, meta, index ?? groups.length) })
-      onDone()
     } catch (err) {
-      setError((err as Error).message)
+      return setError((err as Error).message)
+    }
+    toast.success(index == null ? 'Group added' : 'Group saved', { description: groupTitle(group, meta, index ?? groups.length) })
+    onDone()
+    if (canFallback) {
+      await fallback
+        .sync({ keys: group.keys.map((k) => k['api-key']), removed: (original?.keys ?? []).map((k) => k['api-key']), on: d.fallback, was: wasFallback })
+        .catch(fallbackNotSaved)
     }
   }
 
@@ -323,8 +324,8 @@ function EditorBody({
           <Button type="button" variant="outline" onClick={onDone}>
             Cancel
           </Button>
-          <Button type="submit" disabled={save.isPending || setFallback.isPending}>
-            {(save.isPending || setFallback.isPending) && <Spinner />}
+          <Button type="submit" disabled={save.isPending || fallback.isPending}>
+            {(save.isPending || fallback.isPending) && <Spinner />}
             {original ? 'Save changes' : 'Add group'}
           </Button>
         </div>

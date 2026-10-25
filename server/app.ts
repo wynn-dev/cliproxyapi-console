@@ -309,10 +309,11 @@ app.put('/console/api/api-keys/fallback', async (c) => {
   if (typeof body.on !== 'boolean') return c.json({ error: 'on must be true or false' }, 400)
   try {
     await setFallback(body.provider, body.keys as string[], body.on)
-    return c.json(await apiKeyStatus())
   } catch (err) {
     return c.json({ error: (err as Error).message }, 502)
   }
+  // Saved either way: a status that can't be read is just not sent back.
+  return c.json(await apiKeyStatus().catch(() => null))
 })
 
 app.put('/console/api/api-keys/balance', async (c) => {
@@ -322,11 +323,7 @@ app.put('/console/api/api-keys/balance', async (c) => {
     return c.json({ error: 'Balance must be an amount in USD, or null to clear it' }, 400)
   }
   setBalance(body.key, body.balance as number | null)
-  try {
-    return c.json(await apiKeyStatus())
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 502)
-  }
+  return c.json(await apiKeyStatus().catch(() => null))
 })
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))

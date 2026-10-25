@@ -30,9 +30,13 @@ export interface ConsoleState {
 export interface ApiKeyMark {
   /** Its group only takes traffic while no account of its provider can. */
   fallback?: boolean
+  /** The provider of its group, so a tick only reads the lists that have a fallback. */
+  provider?: string
   /** Credit balance in USD the user entered, and when (ms): what's left is this minus the spend since. */
   balance?: number
   balanceAt?: number
+  /** When the user last entered a balance (ms), kept when it is cleared: an earlier out-of-credits answer no longer counts. */
+  creditsAt?: number
 }
 
 let cached: ConsoleState | undefined

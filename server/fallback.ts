@@ -103,7 +103,7 @@ function errorMessage(body: string) {
 }
 
 /** Out of credits: turned away for it after its last success and after the user last entered a balance. */
-const outOfCredits = (s: KeyStatus | undefined, mark: ApiKeyMark | undefined) => !!s && s.outAt > Math.max(s.okAt, mark?.balanceAt ?? 0)
+const outOfCredits = (s: KeyStatus | undefined, mark: ApiKeyMark | undefined) => !!s && s.outAt > Math.max(s.okAt, mark?.creditsAt ?? mark?.balanceAt ?? 0)
 
 // --- Config ------------------------------------------------------------------------------------
 
@@ -120,29 +120,37 @@ interface Group {
   [k: string]: unknown
 }
 
+/** The provider's list, and the config's ETag so a write can't overwrite a save made after this read. */
 async function readGroups(provider: string) {
   const res = await management(`/config/api-keys/${provider}`)
+  const etag = res?.headers.get('etag') ?? undefined
   // A provider without keys has no list.
-  if (res?.status === 404) return []
+  if (res?.status === 404) return { groups: [] as Group[], etag }
   if (!res?.ok) throw new Error(`could not read the ${provider} API keys${res ? ` (HTTP ${res.status})` : ''}`)
-  return ((await res.json()) ?? []) as Group[]
+  return { groups: ((await res.json()) ?? []) as Group[], etag }
 }
 
-/** Replaces the provider's whole list, as the Providers page does (lists can't be patched by index). */
 function withoutAuthIndex<T extends { auth_index?: string }>(o: T): T {
   const copy = { ...o }
   delete copy.auth_index
   return copy
 }
 
-async function writeGroups(provider: string, groups: Group[]) {
+/**
+ * Replaces the provider's whole list, as the Providers page does (lists can't be patched by index).
+ * With the ETag of the read, a save in between (say from the Providers page) makes CPA answer 412
+ * instead of losing it: false then, and the next tick works from the new list.
+ */
+async function writeGroups(provider: string, groups: Group[], etag: string | undefined) {
   const body = groups.map((g) => ({ ...withoutAuthIndex(g), keys: (g.keys ?? []).map(withoutAuthIndex) }))
-  const res = await management(`/config/api-keys/${provider}`, { method: 'PUT', body })
+  const res = await management(`/config/api-keys/${provider}`, { method: 'PUT', body, headers: etag ? { 'If-Match': etag } : undefined })
+  if (res?.status === 412) return false
   if (!res?.ok) throw new Error(`could not update the ${provider} API keys${res ? ` (HTTP ${res.status})` : ''}`)
+  return true
 }
 
 const marks = () => readState().apiKeys ?? {}
-const isFallback = (g: Group, m: Record<string, ApiKeyMark>) => (g.keys ?? []).some((k) => m[keyId(k['api-key'])]?.fallback)
+const isFallback = (g: Group, m: Record<string, ApiKeyMark>) => (g.keys ?? []).some((k) => m[keyId(k['api-key'] ?? '')]?.fallback)
 const excludesAll = (g: Group) => (g['excluded-models'] ?? []).some((p) => p.trim() === ALL_MODELS)
 const withAll = (g: Group, on: boolean): Group => {
   const rest = (g['excluded-models'] ?? []).filter((p) => p.trim() !== ALL_MODELS)
@@ -182,19 +190,26 @@ type Listed = ListedCredential & { priority?: number }
 export function applyFallback(files: Listed[], now = Date.now()) {
   return exclusive(async () => {
     const m = marks()
-    if (!Object.values(m).some((x) => x.fallback)) {
+    // Only the lists that have a fallback; marks from before the provider was stored count for both.
+    const marked = new Set(Object.values(m).flatMap((x) => (x.fallback ? (x.provider ? [x.provider] : PROVIDERS) : [])))
+    if (!marked.size) {
       states = {}
+      availableSince.clear()
       return
     }
     const status = statuses()
     const next: Record<string, FallbackState> = {}
     for (const provider of PROVIDERS) {
+      if (!marked.has(provider)) {
+        availableSince.delete(provider)
+        continue
+      }
       const accounts = files.filter((f) => f.provider === provider)
       const available = accounts.filter((f) => availability(f as PoolAccount, undefined, now).state === 'available').length
       if (available) availableSince.set(provider, availableSince.get(provider) ?? now)
       else availableSince.delete(provider)
       try {
-        const groups = await readGroups(provider)
+        const { groups, etag } = await readGroups(provider)
         if (!groups.some((g) => isFallback(g, m))) {
           failing.delete(provider)
           continue
@@ -203,11 +218,12 @@ export function applyFallback(files: Listed[], now = Date.now()) {
         const priority = accounts.length ? Math.min(...accounts.map((f) => (typeof f.priority === 'number' ? f.priority : 0))) - 1 : undefined
         const settled = available > 0 && now - availableSince.get(provider)! >= STABLE_MS
         let changed = false
+        const flips: string[] = []
         let active = false
         let allOut = true
         const updated = groups.map((g) => {
           if (!isFallback(g, m)) return g
-          const out = (g.keys ?? []).length > 0 && (g.keys ?? []).every((k) => outOfCredits(status.get(k.auth_index ?? ''), m[keyId(k['api-key'])]))
+          const out = (g.keys ?? []).length > 0 && (g.keys ?? []).every((k) => outOfCredits(status.get(k.auth_index ?? ''), m[keyId(k['api-key'] ?? '')]))
           if (!out) allOut = false
           // While accounts are back but not yet settled, a group already in rotation stays in.
           const on = !out && (available === 0 || (!settled && !excludesAll(g)))
@@ -215,13 +231,14 @@ export function applyFallback(files: Listed[], now = Date.now()) {
           let result = g
           if (excludesAll(g) === on) {
             result = withAll(result, !on)
-            console.log(`API key fallback: ${provider} ${on ? 'in rotation' : 'out of rotation'}${out ? ' (out of credits)' : on ? ' (no account available)' : ' (an account is available)'}`)
+            flips.push(`${on ? 'in rotation' : 'out of rotation'}${out ? ' (out of credits)' : on ? ' (no account available)' : ' (an account is available)'}`)
           }
           if (priority !== undefined && (g.priority ?? 0) !== priority) result = { ...result, priority }
           if (result !== g) changed = true
           return result
         })
-        if (changed) await writeGroups(provider, updated)
+        // Lost to a save in between: the next tick decides again from the new list.
+        if (changed && (await writeGroups(provider, updated, etag))) for (const f of flips) console.log(`API key fallback: ${provider} ${f}`)
         next[provider] = {
           active,
           available,
@@ -244,17 +261,21 @@ export function setFallback(provider: string, apiKeys: string[], on: boolean) {
   return exclusive(async () => {
     const ids = new Set(apiKeys.map(keyId))
     const m = { ...marks() }
-    for (const id of ids) m[id] = { ...m[id], fallback: on || undefined }
+    for (const id of ids) m[id] = { ...m[id], fallback: on || undefined, provider: on ? provider : undefined }
     updateState({ apiKeys: prune(m) })
     if (on) return
-    const groups = await readGroups(provider)
-    let changed = false
-    const updated = groups.map((g) => {
-      if (!excludesAll(g) || isFallback(g, m) || !(g.keys ?? []).some((k) => ids.has(keyId(k['api-key'])))) return g
-      changed = true
-      return withAll(g, false)
-    })
-    if (changed) await writeGroups(provider, updated)
+    // A list saved in between is read again, so it is never written back stale.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { groups, etag } = await readGroups(provider)
+      let changed = false
+      const updated = groups.map((g) => {
+        if (!excludesAll(g) || isFallback(g, m) || !(g.keys ?? []).some((k) => ids.has(keyId(k['api-key'] ?? '')))) return g
+        changed = true
+        return withAll(g, false)
+      })
+      if (!changed || (await writeGroups(provider, updated, etag))) return
+    }
+    throw new Error(`the ${provider} API keys kept changing; try again`)
   })
 }
 
@@ -262,12 +283,13 @@ export function setFallback(provider: string, apiKeys: string[], on: boolean) {
 export function setBalance(apiKey: string, balance: number | null) {
   const id = keyId(apiKey)
   const m = { ...marks() }
-  m[id] = { ...m[id], balance: balance ?? undefined, balanceAt: balance == null ? undefined : Date.now() }
+  const now = Date.now()
+  m[id] = { ...m[id], balance: balance ?? undefined, balanceAt: balance == null ? undefined : now, creditsAt: balance == null ? m[id]?.creditsAt : now }
   updateState({ apiKeys: prune(m) })
 }
 
 const prune = (m: Record<string, ApiKeyMark>) =>
-  Object.fromEntries(Object.entries(m).filter(([, v]) => v.fallback || v.balance !== undefined))
+  Object.fromEntries(Object.entries(m).filter(([, v]) => v.fallback || v.balance !== undefined || v.creditsAt !== undefined))
 
 // --- Status ------------------------------------------------------------------------------------
 

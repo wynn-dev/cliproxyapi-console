@@ -17,7 +17,12 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 - **Insights**: when each pool will reach its reserve at the current pace, which conversations lost their prompt cache
   and why, and a plain summary of the last 7 days.
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
-- **API providers & client keys**: structured editors instead of raw YAML.
+- **API providers & client keys**: structured editors instead of raw YAML. Each upstream API key shows its spend at API
+  prices, its rate limits and, once you enter your balance, the credits it has left. It is flagged when the provider
+  says it is out of credits.
+- **API key fallback**: mark a Claude or Codex API key group as a fallback and it only takes traffic while none of that
+  provider's accounts can (all held back, cooling down or signed out). It leaves rotation a minute after an account is
+  back, so conversations move back to the account instead of staying on the billed key.
 - **Settings**: documented forms for routing, retries, networking and logging, plus a YAML editor with diff review.
 - **Logs & playground**: live log tail, CPA process output, request and error logs, and a streaming chat tester.
 

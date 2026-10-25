@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import type { ApiKeyGroup } from '@/lib/types'
 import { PairRows, SecretInput, TagInput } from './inputs'
 import {
+  FALLBACK_PROVIDERS,
   fromDraft,
   groupTitle,
   isCompat,
@@ -19,6 +20,7 @@ import {
   PROVIDER_INFO,
   toDraft,
   useSaveGroups,
+  useSetFallback,
   validateDraft,
   type GroupDraft,
   type ProviderMeta,
@@ -35,29 +37,53 @@ export function GroupEditor({
   meta,
   groups,
   target,
+  isFallback,
   onOpenChange,
 }: {
   meta: ProviderMeta
   groups: ApiKeyGroup[]
   target: EditorTarget
+  /** Whether the group at `index` is a fallback. */
+  isFallback: (index: number) => boolean
   onOpenChange: (open: boolean) => void
 }) {
   return (
     <Sheet open={target.open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 sm:max-w-xl">
-        <EditorBody key={target.session} meta={meta} groups={groups} index={target.index} onDone={() => onOpenChange(false)} />
+        <EditorBody
+          key={target.session}
+          meta={meta}
+          groups={groups}
+          index={target.index}
+          wasFallback={target.index != null && isFallback(target.index)}
+          onDone={() => onOpenChange(false)}
+        />
       </SheetContent>
     </Sheet>
   )
 }
 
-function EditorBody({ meta, groups, index, onDone }: { meta: ProviderMeta; groups: ApiKeyGroup[]; index: number | null; onDone: () => void }) {
+function EditorBody({
+  meta,
+  groups,
+  index,
+  wasFallback,
+  onDone,
+}: {
+  meta: ProviderMeta
+  groups: ApiKeyGroup[]
+  index: number | null
+  wasFallback: boolean
+  onDone: () => void
+}) {
   const provider = meta.id
   const compat = isCompat(provider)
   const original = index == null ? undefined : groups[index]
-  const [d, setD] = useState<GroupDraft>(() => toDraft(original, provider))
+  const [d, setD] = useState<GroupDraft>(() => toDraft(original, provider, wasFallback))
   const [error, setError] = useState<string | null>(null)
   const save = useSaveGroups(provider)
+  const setFallback = useSetFallback(provider)
+  const canFallback = FALLBACK_PROVIDERS.has(provider)
   const set = <K extends keyof GroupDraft>(k: K, v: GroupDraft[K]) => setD((prev) => ({ ...prev, [k]: v }))
   const required = PROVIDER_INFO[provider].baseUrlRequired
 
@@ -73,6 +99,15 @@ function EditorBody({ meta, groups, index, onDone }: { meta: ProviderMeta; group
     setError(null)
     try {
       await save.mutateAsync(next)
+      if (canFallback && (d.fallback || wasFallback)) {
+        // Every key that may carry the mark, so turning it off clears them all.
+        const keys = [...new Set([...group.keys, ...(original?.keys ?? [])].map((k) => k['api-key']))]
+        if (keys.length) {
+          await setFallback.mutateAsync({ keys, on: d.fallback }).catch((err: Error) => {
+            throw new Error(`The group was saved, but the fallback setting was not: ${err.message}`)
+          })
+        }
+      }
       toast.success(index == null ? 'Group added' : 'Group saved', { description: groupTitle(group, meta, index ?? groups.length) })
       onDone()
     } catch (err) {
@@ -219,8 +254,16 @@ function EditorBody({ meta, groups, index, onDone }: { meta: ProviderMeta; group
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="g-priority">Priority</FieldLabel>
-              <Input id="g-priority" value={d.priority} inputMode="numeric" placeholder="0" className="tabular" onChange={(e) => set('priority', e.target.value)} />
-              <FieldDescription>Higher is preferred.</FieldDescription>
+              <Input
+                id="g-priority"
+                value={d.fallback ? '' : d.priority}
+                inputMode="numeric"
+                placeholder={d.fallback ? 'Set by the console' : '0'}
+                disabled={d.fallback}
+                className="tabular"
+                onChange={(e) => set('priority', e.target.value)}
+              />
+              <FieldDescription>{d.fallback ? `Kept below every ${meta.name} account.` : 'Higher is preferred.'}</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="g-retry">Request retry</FieldLabel>
@@ -228,6 +271,15 @@ function EditorBody({ meta, groups, index, onDone }: { meta: ProviderMeta; group
               <FieldDescription>0 disables retries.</FieldDescription>
             </Field>
           </div>
+          {canFallback && (
+            <SwitchRow
+              id="g-fallback"
+              label={`Fallback for ${meta.name} accounts`}
+              description={`Takes traffic only while no ${meta.name} account can: all held back, cooling down or signed out. Otherwise the console keeps it out of rotation, so conversations move back to an account as soon as one is free.`}
+              checked={d.fallback}
+              onChange={(v) => set('fallback', v)}
+            />
+          )}
           <SwitchRow
             id="g-cooling"
             label="Disable cooling"
@@ -271,8 +323,8 @@ function EditorBody({ meta, groups, index, onDone }: { meta: ProviderMeta; group
           <Button type="button" variant="outline" onClick={onDone}>
             Cancel
           </Button>
-          <Button type="submit" disabled={save.isPending}>
-            {save.isPending && <Spinner />}
+          <Button type="submit" disabled={save.isPending || setFallback.isPending}>
+            {(save.isPending || setFallback.isPending) && <Spinner />}
             {original ? 'Save changes' : 'Add group'}
           </Button>
         </div>

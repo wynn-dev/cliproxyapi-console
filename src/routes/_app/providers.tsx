@@ -8,7 +8,7 @@ import { confirm } from '@/components/confirm'
 import { GroupCard } from '@/components/providers/group-card'
 import { GroupEditor, type EditorTarget } from '@/components/providers/group-editor'
 import { KeyDialog, type KeyTarget } from '@/components/providers/key-dialog'
-import { apiKeyUsageQuery, groupsOf, groupTitle, PROVIDER_INFO, useSaveGroups, type ProviderMeta } from '@/components/providers/model'
+import { apiKeysQuery, apiKeyUsageQuery, groupsOf, groupTitle, isFallbackGroup, PROVIDER_INFO, useSaveGroups, type ProviderMeta } from '@/components/providers/model'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -100,6 +100,7 @@ function ProviderNav({
 
 function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGroup[] }) {
   const usage = useQuery({ ...apiKeyUsageQuery(), enabled: groups.length > 0 })
+  const status = useQuery({ ...apiKeysQuery(), enabled: groups.length > 0 })
   const save = useSaveGroups(meta.id)
   const [editor, setEditor] = useState<EditorTarget>({ open: false, index: null, session: 0 })
   const [keyTarget, setKeyTarget] = useState<KeyTarget>({ open: false, group: 0, key: null, session: 0 })
@@ -181,6 +182,7 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
             group={g}
             index={i}
             usage={usage.data}
+            status={status.data}
             onEdit={() => openEditor(i)}
             onDelete={() => deleteGroup(i)}
             onAddKey={() => openKey(i, null)}
@@ -190,7 +192,13 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
         ))
       )}
 
-      <GroupEditor meta={meta} groups={groups} target={editor} onOpenChange={(open) => setEditor((e) => ({ ...e, open }))} />
+      <GroupEditor
+        meta={meta}
+        groups={groups}
+        target={editor}
+        isFallback={(i) => isFallbackGroup(groups[i], status.data)}
+        onOpenChange={(open) => setEditor((e) => ({ ...e, open }))}
+      />
       <KeyDialog meta={meta} groups={groups} target={keyTarget} onOpenChange={(open) => setKeyTarget((t) => ({ ...t, open }))} />
     </div>
   )

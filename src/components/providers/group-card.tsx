@@ -18,14 +18,17 @@ import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtNumber } from '@/lib/format'
-import type { ApiKeyGroup, ApiKeyUsage } from '@/lib/types'
-import { findKeyUsage, groupTitle, isCompat, type ProviderMeta } from './model'
+import type { ApiKeyGroup, ApiKeysStatus, ApiKeyUsage } from '@/lib/types'
+import { FallbackBadge, KeyStats } from './key-stats'
+import { ALL_MODELS, findKeyUsage, groupTitle, isCompat, isFallbackGroup, type ProviderMeta } from './model'
 
 interface GroupCardProps {
   meta: ProviderMeta
   group: ApiKeyGroup
   index: number
   usage?: ApiKeyUsage
+  /** Spend, credits and fallback state, by auth_index. */
+  status?: ApiKeysStatus
   onEdit: () => void
   onDelete: () => void
   onAddKey: () => void
@@ -33,11 +36,14 @@ interface GroupCardProps {
   onDeleteKey: (key: number) => void
 }
 
-export function GroupCard({ meta, group, index, usage, onEdit, onDelete, onAddKey, onEditKey, onDeleteKey }: GroupCardProps) {
+export function GroupCard({ meta, group, index, usage, status, onEdit, onDelete, onAddKey, onEditKey, onDeleteKey }: GroupCardProps) {
   const compat = isCompat(meta.id)
   const keys = group.keys ?? []
   const models = group.models ?? []
-  const excluded = group['excluded-models'] ?? []
+  const fallback = isFallbackGroup(group, status)
+  // A fallback standing by excludes every model; that is the console's doing, shown by its badge.
+  const excluded = (group['excluded-models'] ?? []).filter((m) => !fallback || m.trim() !== ALL_MODELS)
+  const infos = keys.map((k) => (k.auth_index ? status?.keys[k.auth_index] : undefined))
   const headers = Object.keys(group.headers ?? {})
   const title = groupTitle(group, meta, index)
 
@@ -46,6 +52,14 @@ export function GroupCard({ meta, group, index, usage, onEdit, onDelete, onAddKe
       <CardHeader>
         <CardTitle className="flex min-w-0 items-center gap-2">
           <span className="truncate">{title}</span>
+          {fallback && (
+            <FallbackBadge
+              inRotation={!(group['excluded-models'] ?? []).some((m) => m.trim() === ALL_MODELS)}
+              state={status?.fallback[meta.id]}
+              outOfCredits={infos.length > 0 && infos.every((i) => i?.outOfCredits)}
+              name={meta.name}
+            />
+          )}
           {group.disabled && (
             <Badge variant="destructive">
               <BanIcon />
@@ -79,7 +93,7 @@ export function GroupCard({ meta, group, index, usage, onEdit, onDelete, onAddKe
               prefix <span className="font-mono">{group.prefix}</span>
             </Chip>
           )}
-          {group.priority != null && group.priority !== 0 && (
+          {!fallback && group.priority != null && group.priority !== 0 && (
             <Chip icon={ArrowUpWideNarrowIcon} tip="Higher priority groups are preferred">
               priority {group.priority}
             </Chip>
@@ -124,6 +138,7 @@ export function GroupCard({ meta, group, index, usage, onEdit, onDelete, onAddKe
           <ul className="divide-y rounded-lg border">
             {keys.map((k, i) => {
               const u = findKeyUsage(usage, meta.id, group, k['api-key'])
+              const info = infos[i]
               return (
                 <li key={`${i}-${k['api-key']}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5 pr-1.5 pl-3">
                   <SecretText value={k['api-key']} className="min-w-0 flex-1" />
@@ -158,6 +173,7 @@ export function GroupCard({ meta, group, index, usage, onEdit, onDelete, onAddKe
                       <Trash2Icon />
                     </Button>
                   </div>
+                  {info && <KeyStats apiKey={k['api-key']} info={info} provider={meta.id} />}
                 </li>
               )
             })}

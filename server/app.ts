@@ -15,6 +15,7 @@ import { limitHistory } from './limit-history.ts'
 import { limitCheckStatus, setLimitChecks } from './limit-checks.ts'
 import { limitReadings } from './limits.ts'
 import { fableStatus } from './fable.ts'
+import { apiKeyStatus, setBalance, setFallback } from './fallback.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
 import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReleaseWhenAllHeld, setReserveLimits } from './reserve.ts'
 import { share, snapshot } from './share.ts'
@@ -290,6 +291,42 @@ app.put('/console/api/order/own', async (c) => {
   if (!orderStatus().active) return c.json({ error: 'Smart account order is not managing priorities' }, 409)
   setOwnPriority(name, priority)
   return c.json(orderStatus())
+})
+
+app.get('/console/api/api-keys', async (c) => {
+  try {
+    return c.json(await apiKeyStatus())
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 502)
+  }
+})
+
+// Fallback is set per group: the editor sends every key of the group.
+app.put('/console/api/api-keys/fallback', async (c) => {
+  const body = await c.req.json<{ provider?: unknown; keys?: unknown; on?: unknown }>().catch(() => ({}) as Record<string, unknown>)
+  if (body.provider !== 'claude' && body.provider !== 'codex') return c.json({ error: 'Fallback is only for Claude and Codex keys' }, 400)
+  if (!Array.isArray(body.keys) || !body.keys.length || !body.keys.every((k) => typeof k === 'string' && k.trim())) return c.json({ error: 'keys must be API keys' }, 400)
+  if (typeof body.on !== 'boolean') return c.json({ error: 'on must be true or false' }, 400)
+  try {
+    await setFallback(body.provider, body.keys as string[], body.on)
+    return c.json(await apiKeyStatus())
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 502)
+  }
+})
+
+app.put('/console/api/api-keys/balance', async (c) => {
+  const body = await c.req.json<{ key?: unknown; balance?: unknown }>().catch(() => ({}) as Record<string, unknown>)
+  if (typeof body.key !== 'string' || !body.key.trim()) return c.json({ error: 'key is required' }, 400)
+  if (body.balance !== null && !(typeof body.balance === 'number' && Number.isFinite(body.balance) && body.balance >= 0 && body.balance <= 1e7)) {
+    return c.json({ error: 'Balance must be an amount in USD, or null to clear it' }, 400)
+  }
+  setBalance(body.key, body.balance as number | null)
+  try {
+    return c.json(await apiKeyStatus())
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 502)
+  }
 })
 
 app.get('/console/api/process/output', (c) => c.json(supervisor.output(Number(c.req.query('after') ?? 0))))

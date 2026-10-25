@@ -23,6 +23,16 @@ export interface ConsoleState {
   releaseWhenAllHeld?: boolean
   /** What the user pays for their plans, USD per month, for the share card. */
   planPrice?: number
+  /** Upstream API keys the console tracks, by keyId (a hash, so the keys stay in config.yaml only). */
+  apiKeys?: Record<string, ApiKeyMark>
+}
+
+export interface ApiKeyMark {
+  /** Its group only takes traffic while no account of its provider can. */
+  fallback?: boolean
+  /** Credit balance in USD the user entered, and when (ms): what's left is this minus the spend since. */
+  balance?: number
+  balanceAt?: number
 }
 
 let cached: ConsoleState | undefined

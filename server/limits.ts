@@ -1,4 +1,5 @@
 import { applyFable } from './fable.ts'
+import { applyFallback } from './fallback.ts'
 import { recordCredentialLimits } from './limit-history.ts'
 import { management } from './management.ts'
 import { applyOrder } from './order.ts'
@@ -84,6 +85,7 @@ export function startLimitRecorder() {
           ['Fable reserve', () => applyFable(files, readings)],
           ['Release', () => applyRelease(files, readings)],
           ['Account order', () => applyOrder(files, readings)],
+          ['API key fallback', () => applyFallback(files)],
         ]
         for (const [label, stage] of stages) {
           await stage().then(

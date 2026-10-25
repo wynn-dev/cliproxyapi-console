@@ -156,3 +156,13 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Wrapped story mode: the active slide's progress bar fills over its duration. */
+@keyframes wrapped-progress {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}

@@ -14,6 +14,8 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
   signed-out accounts are taken out of rotation until you sign them in again.
 - **Smart account order**: with fill first, among accounts of the same priority, the one whose weekly limit resets soonest is used first, and
   accounts close to their reserve stop taking new conversations while ongoing ones keep their prompt cache.
+- **Wrapped**: each month as slides to post (tokens, value at API prices, top models, your daily rhythm, streaks,
+  conversations, awards and more), or played full screen as a story.
 - **Insights**: when each pool will reach its reserve at the current pace, which conversations lost their prompt cache
   and why, and a plain summary of the last 7 days.
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.

@@ -18,6 +18,29 @@ const SNAPSHOT_FILE = /^[0-9a-f]{32}\.png$/
 
 const HOUR = 3_600_000
 
+/** Client names for the user agents CPA records, by the product before the first "/" or space. */
+const CLIENTS: Record<string, string> = {
+  'claude-cli': 'Claude Code',
+  'claude-code': 'Claude Code',
+  codex_cli_rs: 'Codex CLI',
+  codex_exec: 'Codex CLI',
+  'codex-tui': 'Codex CLI',
+  codex_vscode: 'Codex in VS Code',
+  opencode: 'OpenCode',
+  'factory-cli': 'Factory Droid',
+  cursor: 'Cursor',
+  'roo-code': 'Roo Code',
+  cline: 'Cline',
+  'kilo-code': 'Kilo Code',
+  pi: 'pi',
+}
+
+export function clientName(userAgent: string) {
+  const product = userAgent.trim().split(/[/\s]/)[0]
+  if (!product) return ''
+  return CLIENTS[product.toLowerCase()] ?? product
+}
+
 /**
  * What the card shows for [from, to): the last 7 days, or a calendar month for the wrapped. tzOffsetMin
  * (Date.getTimezoneOffset) only aligns the hourly series to the viewer's half and quarter hours.
@@ -38,6 +61,34 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
   const hours = db
     .prepare('SELECT ((ts + ?) / ?) * ? - ? AS t, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? GROUP BY 1 ORDER BY 1')
     .all(shift, BigInt(HOUR), BigInt(HOUR), shift, from, to) as { t: number; tokens: number }[]
+  const providers = db
+    .prepare("SELECT provider AS name, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND provider != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
+    .all(from, to) as { name: string; tokens: number }[]
+  // Conversations: CPA's session ids. Requests are client requests, not attempts.
+  const sessions = db
+    .prepare(
+      `SELECT COUNT(*) AS count, TOTAL(compactions) AS compactions, MAX(requests) AS longest
+       FROM (SELECT COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)) AS requests, TOTAL(is_compaction) AS compactions
+             FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id)`,
+    )
+    .get(from, to) as { count: number; compactions: number; longest: number | null }
+  // The conversation with the most requests: how many, its tokens and how long it ran.
+  const longest = sessions.longest
+    ? (db
+        .prepare(
+          `SELECT COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)) AS requests, TOTAL(total_tokens) AS tokens, MAX(ts) - MIN(ts) AS ms
+           FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id ORDER BY 1 DESC, 2 DESC LIMIT 1`,
+        )
+        .get(from, to) as { requests: number; tokens: number; ms: number })
+    : null
+  const clients = new Map<string, number>()
+  const agents = db
+    .prepare("SELECT user_agent AS ua, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND user_agent != '' GROUP BY 1")
+    .all(from, to) as { ua: string; tokens: number }[]
+  for (const a of agents) {
+    const name = clientName(a.ua)
+    if (name && a.tokens > 0) clients.set(name, (clients.get(name) ?? 0) + a.tokens)
+  }
   return {
     from,
     to,
@@ -53,6 +104,13 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
     cacheHitRate: t.input ? t.cached / t.input : null,
     accounts,
     hours,
+    input: t.input,
+    output: t.output,
+    cached: t.cached,
+    avgTtft: t.avgTtft,
+    providers,
+    sessions: { count: sessions.count, compactions: sessions.compactions, longest },
+    clients: [...clients].map(([name, tokens]) => ({ name, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 5),
     planPrice: readState().planPrice ?? null,
   }
 }

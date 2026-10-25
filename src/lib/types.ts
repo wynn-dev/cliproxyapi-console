@@ -172,6 +172,17 @@ export interface ShareSummary {
   accounts: { key: string; tokens: number }[]
   /** Tokens per hour, hours with traffic only. */
   hours: { t: number; tokens: number }[]
+  /** Input counts cache reads and writes; cached is the cache-read part. Output includes reasoning. */
+  input: number
+  output: number
+  cached: number
+  avgTtft: number | null
+  /** Up to 5, most tokens first. */
+  providers: { name: string; tokens: number }[]
+  /** Conversations (CPA session ids), and the one with the most requests. */
+  sessions: { count: number; compactions: number; longest: { requests: number; tokens: number; ms: number } | null }
+  /** Client tools by user agent, up to 5, most tokens first. */
+  clients: { name: string; tokens: number }[]
   planPrice: number | null
 }
 

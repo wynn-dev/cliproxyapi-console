@@ -274,7 +274,7 @@ export function RhythmSlide({ w }: { w: Wrapped }) {
           </div>
         )}
       </div>
-      <div className="grid grid-cols-[64px_repeat(24,1fr)] gap-1">
+      <div className="grid grid-cols-[64px_repeat(24,minmax(0,1fr))] gap-1">
         {w.grid.map((row, d) => (
           <div key={d} className="contents">
             <div className="flex items-center text-lg text-muted-foreground">{WEEKDAYS[d]}</div>
@@ -294,8 +294,8 @@ export function RhythmSlide({ w }: { w: Wrapped }) {
   )
 }
 
-/** The month as a calendar, colored by tokens, with the longest run of active days outlined. */
-export function CalendarSlide({ w, month }: { w: Wrapped; month: string }) {
+/** The month as a calendar, colored by tokens, with the longest run of active days outlined. `of` is the days so far. */
+export function CalendarSlide({ w, month, of }: { w: Wrapped; month: string; of: number }) {
   const max = Math.max(1, ...w.perDay)
   const cells = [...Array.from({ length: w.firstWeekday }, () => null), ...w.perDay.map((n, i) => ({ n, i }))]
   const inStreak = (i: number) => w.streak.days > 1 && i >= w.streak.start && i <= w.streak.end
@@ -306,9 +306,9 @@ export function CalendarSlide({ w, month }: { w: Wrapped; month: string }) {
         <div>
           <Big>
             {w.activeDays}
-            <span className="text-6xl text-muted-foreground">/{w.perDay.length}</span>
+            <span className="text-6xl text-muted-foreground">/{of}</span>
           </Big>
-          <div className="mt-3 text-3xl text-muted-foreground">days with traffic</div>
+          <div className="mt-3 text-3xl text-muted-foreground">days with traffic{of < w.perDay.length && ' so far'}</div>
         </div>
         {w.streak.days > 1 && (
           <div className="flex items-center gap-4">
@@ -354,7 +354,7 @@ export function ConversationsSlide({ s }: { s: ShareSummary }) {
         <Kicker>Conversations</Kicker>
         <Big>{fmtNumber(s.sessions.count)}</Big>
         <div className="text-3xl text-muted-foreground">
-          conversations, {fmtNumber(Math.round(s.requests / Math.max(1, s.sessions.count)))} requests each on average
+          conversations, {fmtNumber(Math.round(s.sessions.requests / Math.max(1, s.sessions.count)))} requests each on average
         </div>
       </div>
       <div className="grid grid-cols-3 gap-6">
@@ -423,19 +423,19 @@ export function AwardsSlide({ awards }: { awards: Award[] }) {
   return (
     <div className="flex h-full flex-col gap-8">
       <Kicker>This month's awards</Kicker>
-      <div className={cn('grid flex-1 gap-5', awards.length > 4 ? 'grid-cols-3' : 'grid-cols-2')}>
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-5">
         {awards.map((a, i) => {
           const Icon = AWARD_ICONS[a.id] ?? GemIcon
           const color = STACK_COLORS[i % STACK_COLORS.length]
           return (
             <div
               key={a.id}
-              className="flex flex-col justify-center gap-3 rounded-2xl p-6"
+              className="flex min-w-0 flex-col justify-center gap-3 rounded-2xl p-6"
               style={{ background: `color-mix(in oklab, ${color} 14%, var(--card))`, boxShadow: `inset 0 0 0 2px color-mix(in oklab, ${color} 35%, transparent)` }}
             >
               <Icon className="size-12" style={{ color }} />
-              <div className="text-4xl font-semibold tracking-tight">{a.title}</div>
-              <div className="text-xl text-muted-foreground">{a.line}</div>
+              <div className="truncate text-4xl font-semibold tracking-tight">{a.title}</div>
+              <div className="truncate text-xl text-muted-foreground">{a.line}</div>
             </div>
           )
         })}

@@ -35,10 +35,11 @@ const CLIENTS: Record<string, string> = {
   pi: 'pi',
 }
 
+/** The client's name, or "Other" for user agents the console doesn't know (libraries, browsers). */
 export function clientName(userAgent: string) {
   const product = userAgent.trim().split(/[/\s]/)[0]
   if (!product) return ''
-  return CLIENTS[product.toLowerCase()] ?? product
+  return CLIENTS[product.toLowerCase()] ?? 'Other'
 }
 
 /**
@@ -64,23 +65,22 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
   const providers = db
     .prepare("SELECT provider AS name, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND provider != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
     .all(from, to) as { name: string; tokens: number }[]
-  // Conversations: CPA's session ids. Requests are client requests, not attempts.
-  const sessions = db
+  // Conversations: CPA's session ids, one row each. Requests are client requests, not attempts; a
+  // Codex websocket session keeps one request_id for all its turns, so its successes count instead.
+  const conversations = db
     .prepare(
-      `SELECT COUNT(*) AS count, TOTAL(compactions) AS compactions, MAX(requests) AS longest
-       FROM (SELECT COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)) AS requests, TOTAL(is_compaction) AS compactions
-             FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id)`,
+      `SELECT MAX(COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)), TOTAL(failed = 0)) AS requests, TOTAL(is_compaction) AS compactions,
+        TOTAL(total_tokens) AS tokens, MAX(ts) - MIN(ts) AS ms
+       FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id`,
     )
-    .get(from, to) as { count: number; compactions: number; longest: number | null }
-  // The conversation with the most requests: how many, its tokens and how long it ran.
-  const longest = sessions.longest
-    ? (db
-        .prepare(
-          `SELECT COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)) AS requests, TOTAL(total_tokens) AS tokens, MAX(ts) - MIN(ts) AS ms
-           FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id ORDER BY 1 DESC, 2 DESC LIMIT 1`,
-        )
-        .get(from, to) as { requests: number; tokens: number; ms: number })
-    : null
+    .all(from, to) as { requests: number; compactions: number; tokens: number; ms: number }[]
+  const sessions = { count: conversations.length, requests: 0, compactions: 0, longest: null as { requests: number; tokens: number; ms: number } | null }
+  for (const c of conversations) {
+    sessions.requests += c.requests
+    sessions.compactions += c.compactions
+    const l = sessions.longest
+    if (!l || c.requests > l.requests || (c.requests === l.requests && c.tokens > l.tokens)) sessions.longest = { requests: c.requests, tokens: c.tokens, ms: c.ms }
+  }
   const clients = new Map<string, number>()
   const agents = db
     .prepare("SELECT user_agent AS ua, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND user_agent != '' GROUP BY 1")
@@ -109,8 +109,12 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
     cached: t.cached,
     avgTtft: t.avgTtft,
     providers,
-    sessions: { count: sessions.count, compactions: sessions.compactions, longest },
-    clients: [...clients].map(([name, tokens]) => ({ name, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 5),
+    sessions,
+    // Most tokens first, "Other" last.
+    clients: [...clients]
+      .map(([name, tokens]) => ({ name, tokens }))
+      .sort((a, b) => Number(a.name === 'Other') - Number(b.name === 'Other') || b.tokens - a.tokens)
+      .slice(0, 5),
     planPrice: readState().planPrice ?? null,
   }
 }

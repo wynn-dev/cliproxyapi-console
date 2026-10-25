@@ -12,8 +12,23 @@ export const H = 675
 /** Where the console lives, for the slide footer. */
 export const REPO = 'github.com/wynn-dev/cliproxyapi-console'
 
-const ACCENTS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-7)', 'var(--chart-5)', 'var(--chart-4)']
-export const accentFor = (i: number) => ACCENTS[i % ACCENTS.length]
+/** Each slide's accent, fixed by slide so it doesn't change when a slide before it comes or goes. */
+const ACCENTS: Record<string, string> = {
+  summary: 'var(--chart-1)',
+  versus: 'var(--chart-2)',
+  value: 'var(--chart-3)',
+  models: 'var(--chart-7)',
+  stack: 'var(--chart-5)',
+  cache: 'var(--chart-4)',
+  'busiest-day': 'var(--chart-2)',
+  rhythm: 'var(--chart-1)',
+  calendar: 'var(--chart-2)',
+  conversations: 'var(--chart-3)',
+  numbers: 'var(--chart-7)',
+  accounts: 'var(--chart-5)',
+  awards: 'var(--chart-4)',
+}
+export const accentFor = (id: string) => ACCENTS[id] ?? 'var(--chart-1)'
 
 export type Personality = 'early-bird' | 'daytime' | 'evening' | 'night-owl'
 
@@ -61,7 +76,7 @@ export function deriveWrapped(s: ShareSummary, month: string, days: number) {
     const weekday = (d.getDay() + 6) % 7
     grid[weekday][d.getHours()] += h.tokens
     if (weekday >= 5) weekend += h.tokens
-    if (!peak || h.tokens > peak.tokens) peak = h
+    if (h.tokens > 0 && (!peak || h.tokens > peak.tokens)) peak = h
   }
   const total = byHour.reduce((a, b) => a + b, 0)
   const busiest = perDay.reduce((best, n, i) => (n > perDay[best] ? i : best), 0)
@@ -108,7 +123,7 @@ export type Wrapped = ReturnType<typeof deriveWrapped>
 const pct = (n: number) => `${Math.round(n * 100)}%`
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
-/** Up to six awards the month earned, the most striking first. */
+/** Up to four awards the month earned, the most striking first (four fit the slide). */
 export function awards(s: ShareSummary, w: Wrapped): Award[] {
   const out: Award[] = []
   const add = (ok: boolean | null | undefined, a: Award) => ok && out.push(a)
@@ -123,5 +138,5 @@ export function awards(s: ShareSummary, w: Wrapped): Award[] {
   add(w.weekendShare >= 0.35, { id: 'weekend', title: 'Weekend warrior', line: `${pct(w.weekendShare)} of tokens on weekends` })
   add(topShare >= 0.7, { id: 'loyal', title: 'Model loyalist', line: `${pct(topShare)} on ${s.topModel?.model}` })
   add(topShare < 0.7 && s.topModels.length >= 4, { id: 'explorer', title: 'Model explorer', line: `${s.topModels.length}+ models in the mix` })
-  return out.slice(0, 6)
+  return out.slice(0, 4)
 }

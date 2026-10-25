@@ -111,15 +111,16 @@ function WrappedPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <Recap key={month} month={month} hasPrevious={list.includes(previousMonth(month))} />
+        <Recap key={month} month={month} inProgress={month === current} hasPrevious={list.includes(previousMonth(month))} />
       )}
     </>
   )
 }
 
-function Recap({ month, hasPrevious }: { month: string; hasPrevious: boolean }) {
+function Recap({ month, inProgress, hasPrevious }: { month: string; inProgress: boolean; hasPrevious: boolean }) {
   const { from, to, days } = monthRange(month)
-  const tz = new Date().getTimezoneOffset()
+  // Fixed for the page's life: the zone for the queries, and today's date for a month so far.
+  const [{ tz, today }] = useState(() => ({ tz: new Date().getTimezoneOffset(), today: new Date().getDate() }))
   const summary = useQuery({
     queryKey: ['console', 'share', 'summary', from, to],
     queryFn: () => consoleApi<ShareSummary>('/share/summary', { query: { from, to, tz } }),
@@ -128,7 +129,8 @@ function Recap({ month, hasPrevious }: { month: string; hasPrevious: boolean }) 
   const previous = useQuery({
     queryKey: ['console', 'share', 'summary', before.from, before.to],
     queryFn: () => consoleApi<ShareSummary>('/share/summary', { query: { from: before.from, to: before.to, tz } }),
-    enabled: hasPrevious,
+    // A month so far against a whole one would always look like a drop.
+    enabled: hasPrevious && !inProgress,
   })
   const labels = useCredentialLabels()
   const [showNames, setShowNames] = useState(false)
@@ -154,25 +156,28 @@ function Recap({ month, hasPrevious }: { month: string; hasPrevious: boolean }) 
   const file = (slide: string) => `cpa-wrapped-${month}-${slide}.png`
   const w = deriveWrapped(s, month, days)
   const earned = awards(s, w)
-  const prev = previous.data && previous.data.tokens > 0 ? previous.data : undefined
+  // A month of failed requests has rows but no tokens: only the slides that still say something.
+  const tokens = s.tokens > 0
+  // Not from the query alone: a disabled query still hands back the month cached from viewing it.
+  const prev = !inProgress && previous.data && previous.data.tokens > 0 ? previous.data : undefined
 
   const slides = (
     [
       { id: 'summary', content: <SummarySlide s={s} /> },
       prev && { id: 'versus', content: <VersusSlide s={s} prev={prev} prevName={monthName(previousMonth(month)).split(' ')[0]} /> },
       { id: 'value', content: <ValueSlide s={s} name={name} /> },
-      { id: 'models', content: <ModelsSlide s={s} /> },
-      (s.providers.length > 1 || s.clients.length > 0) && { id: 'stack', content: <StackSlide s={s} /> },
-      { id: 'cache', content: <CacheSlide s={s} /> },
-      { id: 'busiest-day', content: <BusiestDaySlide w={w} month={month} /> },
-      { id: 'rhythm', content: <RhythmSlide w={w} /> },
-      { id: 'calendar', content: <CalendarSlide w={w} month={month} /> },
+      tokens && { id: 'models', content: <ModelsSlide s={s} /> },
+      (s.providers.length > 1 || s.clients.some((c) => c.name !== 'Other')) && { id: 'stack', content: <StackSlide s={s} /> },
+      s.cacheHitRate != null && { id: 'cache', content: <CacheSlide s={s} /> },
+      tokens && { id: 'busiest-day', content: <BusiestDaySlide w={w} month={month} /> },
+      tokens && { id: 'rhythm', content: <RhythmSlide w={w} /> },
+      tokens && { id: 'calendar', content: <CalendarSlide w={w} month={month} of={inProgress ? Math.max(today, w.activeDays) : days} /> },
       s.sessions.count > 0 && { id: 'conversations', content: <ConversationsSlide s={s} /> },
-      { id: 'numbers', content: <NumbersSlide s={s} w={w} /> },
-      { id: 'accounts', content: <AccountsSlide s={s} names={names} /> },
+      tokens && { id: 'numbers', content: <NumbersSlide s={s} w={w} /> },
+      s.accounts.length > 0 && { id: 'accounts', content: <AccountsSlide s={s} names={names} /> },
       earned.length > 0 && { id: 'awards', content: <AwardsSlide awards={earned} /> },
     ].filter(Boolean) as { id: string; content: React.ReactNode }[]
-  ).map((slide, i) => ({ ...slide, accent: accentFor(i) }))
+  ).map((slide) => ({ ...slide, accent: accentFor(slide.id) }))
 
   return (
     <div className="space-y-6">

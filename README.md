@@ -19,7 +19,7 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 - **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
 - **API providers & client keys**: structured editors instead of raw YAML.
 - **Settings**: documented forms for routing, retries, networking and logging, plus a YAML editor with diff review.
-- **Logs & playground**: live log tail, CPA process output, request and error logs, and a streaming chat tester.
+- **Logs**: live log tail, CPA process output, and request and error logs.
 
 ## Preview
 

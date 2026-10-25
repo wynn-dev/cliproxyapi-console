@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from '@tanstack/react-router'
 import {
   BarChart3Icon,
   BlocksIcon,
-  FlaskConicalIcon,
   GiftIcon,
   KeyRoundIcon,
   LayoutDashboardIcon,
@@ -58,7 +57,6 @@ const NAV = [
     label: 'Tools',
     items: [
       { to: '/connect', label: 'Connect', icon: PlugIcon },
-      { to: '/playground', label: 'Playground', icon: FlaskConicalIcon },
     ],
   },
 ] as const

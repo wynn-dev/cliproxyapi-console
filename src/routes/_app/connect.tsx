@@ -4,7 +4,7 @@ import { KeyRoundIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { CopyButton, PageHeader, StatusDot } from '@/components/common'
-import { ModelPicker, type ProxyModel } from '@/components/playground/model-picker'
+import { ModelPicker, type ProxyModel } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -34,7 +34,6 @@ export const Route = createFileRoute('/_app/connect')({
 
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]']
 const NEW_KEY = 'new'
-const PLAYGROUND_MODEL_KEY = 'cpa-console.playground.model'
 
 type Shell = 'posix' | 'powershell'
 
@@ -446,12 +445,12 @@ function OtherClients({ origin, clientKey }: { origin: string; clientKey: string
   const [picked, setModel] = useState<string>()
   const list = models.data ?? []
   const has = (id?: string | null) => !!id && list.some((m) => m.id === id)
-  // The model last used in the playground, else the newest Claude Sonnet.
+  // The newest Claude Sonnet, else the first model.
   const sonnet = list
     .map((m) => m.id)
     .filter((id) => id.startsWith('claude-sonnet-'))
     .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))[0]
-  const fallback = [localStorage.getItem(PLAYGROUND_MODEL_KEY), sonnet, list[0]?.id].find(has)
+  const fallback = [sonnet, list[0]?.id].find(has)
   const model = (has(picked) ? picked : fallback) ?? '<model>'
 
   const curl =

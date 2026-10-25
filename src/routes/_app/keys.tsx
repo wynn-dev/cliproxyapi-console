@@ -48,11 +48,8 @@ function ClientKeys() {
     confirm({
       title: last ? 'Delete the last client key?' : `Delete key ${maskSecret(key)}?`,
       description: last ? (
-        <span className="block space-y-2">
-          <span className="block font-medium text-destructive">
-            With no client keys, CLIProxyAPI accepts requests without authentication — anyone who can reach the proxy can use your providers.
-          </span>
-          <span className="block">The playground also stops working until you add a key.</span>
+        <span className="block font-medium text-destructive">
+          With no client keys, CLIProxyAPI accepts requests without authentication — anyone who can reach the proxy can use your providers.
         </span>
       ) : (
         'Clients using this key get 401 errors right away.'
@@ -179,7 +176,7 @@ function KeysCard({ keys, loading, onDelete }: { keys: string[]; loading: boolea
                                 Console
                               </Badge>
                             </TooltipTrigger>
-                            <TooltipContent>The playground and model list use the first key.</TooltipContent>
+                            <TooltipContent>The console lists models with the first key.</TooltipContent>
                           </Tooltip>
                         )}
                       </div>

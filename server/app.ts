@@ -390,16 +390,14 @@ function upstreamHeaders(c: Context, authorization: string | undefined) {
   return headers
 }
 
-// Playground: call the OpenAI-compatible API with the first client key, so the browser never needs one.
-app.all('/console/api/v1/*', (c) => {
+// The model list for the Connect page, with the first client key so the browser never needs one. Only
+// the list: the console never sends requests to the accounts itself, since providers can ban
+// subscriptions used outside their own clients.
+app.get('/console/api/v1/models', (c) => {
   const base = cpaBase()
   if (!base) return notRunning(c)
-  const url = new URL(c.req.url)
   const key = readCpaConfig()?.clientKeys[0]
-  return proxy(`${base}${url.pathname.replace('/console/api', '')}${url.search}`, {
-    ...c.req,
-    headers: upstreamHeaders(c, key ? `Bearer ${key}` : undefined),
-  })
+  return proxy(`${base}/v1/models`, { ...c.req, headers: upstreamHeaders(c, key ? `Bearer ${key}` : undefined) })
 })
 
 // Management API: verified here first so wrong keys never trip CPA's localhost lockout.

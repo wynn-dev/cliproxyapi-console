@@ -48,11 +48,8 @@ function ClientKeys() {
     confirm({
       title: last ? 'Delete the last client key?' : `Delete key ${maskSecret(key)}?`,
       description: last ? (
-        <span className="block space-y-2">
-          <span className="block font-medium text-destructive">
-            With no client keys, CLIProxyAPI accepts requests without authentication — anyone who can reach the proxy can use your providers.
-          </span>
-          <span className="block">The Connect page can't list models until you add one.</span>
+        <span className="block font-medium text-destructive">
+          With no client keys, CLIProxyAPI accepts requests without authentication — anyone who can reach the proxy can use your providers.
         </span>
       ) : (
         'Clients using this key get 401 errors right away.'

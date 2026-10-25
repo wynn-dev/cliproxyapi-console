@@ -67,6 +67,7 @@ const columns = new Set((db.prepare('PRAGMA table_info(requests)').all() as { na
 for (const [col, type] of Object.entries(ADDED_COLUMNS)) if (!columns.has(col)) db.exec(`ALTER TABLE requests ADD COLUMN ${col} ${type}`)
 db.exec("CREATE INDEX IF NOT EXISTS requests_session ON requests (session_id, ts) WHERE session_id != ''")
 db.exec('CREATE INDEX IF NOT EXISTS requests_request_id ON requests (request_id)')
+db.exec('CREATE INDEX IF NOT EXISTS requests_auth ON requests (auth_index, ts)')
 
 /**
  * Client requests CPA turned away before any account served them: every account cooling down or
@@ -606,6 +607,36 @@ export function usageFacets(from: number, to: number) {
         .all(from, to, ...(turnedAway ? [from, to] : [])) as { v: string }[]
     ).map((r) => r.v)
   return { models: distinct('model'), providers: distinct('provider'), credentials: distinct('auth_index', false), apiKeys: distinct('api_key') }
+}
+
+/**
+ * What one credential (an upstream API key) spent at API list prices, over the last day, week and
+ * 30 days and since `balance` (0 without one), with its attempts and tokens over the 30 days.
+ */
+export function apiKeySpend(authIndex: string, since: { day: number; week: number; month: number; balance?: number }) {
+  const balance = since.balance ?? Number.MAX_SAFE_INTEGER
+  return db
+    .prepare(
+      `SELECT TOTAL(CASE WHEN ts >= $day THEN v END) AS day, TOTAL(CASE WHEN ts >= $week THEN v END) AS week,
+        TOTAL(CASE WHEN ts >= $month THEN v END) AS month, TOTAL(CASE WHEN ts >= $balance THEN v END) AS sinceBalance,
+        TOTAL(ts >= $month) AS requests, TOTAL(ts >= $month AND failed) AS failed,
+        TOTAL(CASE WHEN ts >= $month THEN input_tokens END) AS input, TOTAL(CASE WHEN ts >= $month THEN output_tokens END) AS output,
+        TOTAL(CASE WHEN ts >= $month THEN cached_tokens END) AS cached,
+        TOTAL(CASE WHEN ts >= $month AND v IS NULL THEN input_tokens + output_tokens END) AS unpricedTokens
+       FROM (SELECT *, ${VALUE} AS v FROM requests WHERE auth_index = $index AND ts >= $from LIMIT -1)`,
+    )
+    .get({ index: authIndex, from: Math.min(since.month, balance), day: since.day, week: since.week, month: since.month, balance }) as {
+    day: number
+    week: number
+    month: number
+    sinceBalance: number
+    requests: number
+    failed: number
+    input: number
+    output: number
+    cached: number
+    unpricedTokens: number
+  }
 }
 
 export function clearUsage() {

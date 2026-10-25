@@ -8,7 +8,18 @@ import { confirm } from '@/components/confirm'
 import { GroupCard } from '@/components/providers/group-card'
 import { GroupEditor, type EditorTarget } from '@/components/providers/group-editor'
 import { KeyDialog, type KeyTarget } from '@/components/providers/key-dialog'
-import { apiKeyUsageQuery, groupsOf, groupTitle, PROVIDER_INFO, useSaveGroups, type ProviderMeta } from '@/components/providers/model'
+import {
+  apiKeysQuery,
+  apiKeyUsageQuery,
+  fallbackNotSaved,
+  groupsOf,
+  groupTitle,
+  isFallbackGroup,
+  PROVIDER_INFO,
+  useSaveGroups,
+  useSyncFallback,
+  type ProviderMeta,
+} from '@/components/providers/model'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -100,7 +111,9 @@ function ProviderNav({
 
 function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGroup[] }) {
   const usage = useQuery({ ...apiKeyUsageQuery(), enabled: groups.length > 0 })
+  const status = useQuery({ ...apiKeysQuery(), enabled: groups.length > 0 })
   const save = useSaveGroups(meta.id)
+  const fallback = useSyncFallback(meta.id)
   const [editor, setEditor] = useState<EditorTarget>({ open: false, index: null, session: 0 })
   const [keyTarget, setKeyTarget] = useState<KeyTarget>({ open: false, group: 0, key: null, session: 0 })
   const openEditor = (index: number | null) => setEditor((e) => ({ open: true, index, session: e.session + 1 }))
@@ -117,7 +130,11 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
       onConfirm: () =>
         save
           .mutateAsync(groups.filter((_, i) => i !== index))
-          .then(() => toast.success('Group deleted'))
+          .then(() => {
+            toast.success('Group deleted')
+            // So a key of a deleted fallback group doesn't make another group a fallback.
+            void fallback.sync({ keys: [], removed: (g.keys ?? []).map((k) => k['api-key']), on: false, was: isFallbackGroup(g, status.data) }).catch(fallbackNotSaved)
+          })
           .catch((err: Error) => toast.error('Could not delete group', { description: err.message })),
     })
   }
@@ -135,7 +152,12 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
       onConfirm: () =>
         save
           .mutateAsync(groups.map((x, i) => (i === gi ? { ...x, keys: x.keys.filter((_, j) => j !== ki) } : x)))
-          .then(() => toast.success('Key deleted'))
+          .then(() => {
+            toast.success('Key deleted')
+            const keys = g.keys.filter((_, j) => j !== ki).map((k) => k['api-key'])
+            const was = isFallbackGroup(g, status.data)
+            void fallback.sync({ keys, removed: [g.keys[ki]['api-key']], on: was, was }).catch(fallbackNotSaved)
+          })
           .catch((err: Error) => toast.error('Could not delete key', { description: err.message })),
     })
   }
@@ -181,6 +203,7 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
             group={g}
             index={i}
             usage={usage.data}
+            status={status.data}
             onEdit={() => openEditor(i)}
             onDelete={() => deleteGroup(i)}
             onAddKey={() => openKey(i, null)}
@@ -190,8 +213,20 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
         ))
       )}
 
-      <GroupEditor meta={meta} groups={groups} target={editor} onOpenChange={(open) => setEditor((e) => ({ ...e, open }))} />
-      <KeyDialog meta={meta} groups={groups} target={keyTarget} onOpenChange={(open) => setKeyTarget((t) => ({ ...t, open }))} />
+      <GroupEditor
+        meta={meta}
+        groups={groups}
+        target={editor}
+        isFallback={status.isSuccess ? (i) => isFallbackGroup(groups[i], status.data) : undefined}
+        onOpenChange={(open) => setEditor((e) => ({ ...e, open }))}
+      />
+      <KeyDialog
+        meta={meta}
+        groups={groups}
+        target={keyTarget}
+        isFallback={isFallbackGroup(groups[keyTarget.group], status.data)}
+        onOpenChange={(open) => setKeyTarget((t) => ({ ...t, open }))}
+      />
     </div>
   )
 }

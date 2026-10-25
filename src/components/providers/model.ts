@@ -1,7 +1,8 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
-import { mgmt } from '@/lib/api'
+import { toast } from 'sonner'
+import { consoleApi, mgmt } from '@/lib/api'
 import { API_KEY_PROVIDERS } from '@/lib/providers'
-import type { ApiKeyEntry, ApiKeyGroup, ApiKeyUsage, V8Config } from '@/lib/types'
+import type { ApiKeyEntry, ApiKeyGroup, ApiKeysStatus, ApiKeyUsage, V8Config } from '@/lib/types'
 
 export type ProviderId = (typeof API_KEY_PROVIDERS)[number]['id']
 export type ProviderMeta = (typeof API_KEY_PROVIDERS)[number]
@@ -25,6 +26,73 @@ export const apiKeyUsageQuery = () =>
     queryFn: () => mgmt<ApiKeyUsage>('/observability/usage/api-keys'),
     refetchInterval: 10_000,
   })
+
+/** Providers whose subscription accounts an API key group can stand behind as a fallback. */
+export const FALLBACK_PROVIDERS = new Set(['claude', 'codex'])
+
+/** Spend, credits, rate limits and fallback state of every API key, by auth_index. */
+export const apiKeysQuery = () =>
+  queryOptions({
+    queryKey: ['console', 'api-keys'],
+    queryFn: () => consoleApi<ApiKeysStatus>('/api-keys'),
+    refetchInterval: 15_000,
+  })
+
+/** A group is a fallback when the console has its keys marked so. */
+export const isFallbackGroup = (g: ApiKeyGroup | undefined, status: ApiKeysStatus | undefined) =>
+  !!g && (g.keys ?? []).some((k) => k.auth_index && status?.keys[k.auth_index]?.fallback)
+
+/** CPA's pattern for a config API key that serves no model; the console sets it on a fallback standing by. */
+export const ALL_MODELS = '*'
+
+export function useSetFallback(provider: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ keys, on }: { keys: string[]; on: boolean }) =>
+      consoleApi<ApiKeysStatus | null>('/api-keys/fallback', { method: 'PUT', body: { provider, keys, on } }),
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(['console', 'api-keys'], data)
+      else void qc.invalidateQueries({ queryKey: ['console', 'api-keys'] })
+      void qc.invalidateQueries({ queryKey: ['mgmt', 'config'] })
+    },
+  })
+}
+
+/**
+ * Fallback marks belong to keys, so every change to a fallback group's keys goes through here once
+ * the group is saved: keys that left it lose their mark and the ones in it get the group's setting.
+ * Groups that were never a fallback are left alone, so a "*" the user excluded stays theirs.
+ */
+export function useSyncFallback(provider: string) {
+  const set = useSetFallback(provider)
+  return {
+    isPending: set.isPending,
+    sync: async ({ keys, removed = [], on, was }: { keys: string[]; removed?: string[]; on: boolean; was: boolean }) => {
+      if (!FALLBACK_PROVIDERS.has(provider) || (!on && !was)) return
+      const gone = removed.filter((k) => !keys.includes(k))
+      if (on) {
+        if (was && gone.length) await set.mutateAsync({ keys: gone, on: false })
+        if (keys.length) await set.mutateAsync({ keys, on: true })
+      } else if (keys.length || gone.length) await set.mutateAsync({ keys: [...keys, ...gone], on: false })
+    },
+  }
+}
+
+/** A save that went through while its fallback setting did not: said once, without keeping a form open to resubmit. */
+export const fallbackNotSaved = (err: Error) =>
+  toast.error('Saved, but the fallback setting was not', { description: `${err.message} Open the group and save it again.` })
+
+export function useSetBalance() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ key, balance }: { key: string; balance: number | null }) =>
+      consoleApi<ApiKeysStatus | null>('/api-keys/balance', { method: 'PUT', body: { key, balance } }),
+    onSuccess: (data) => {
+      if (data) qc.setQueryData(['console', 'api-keys'], data)
+      else void qc.invalidateQueries({ queryKey: ['console', 'api-keys'] })
+    },
+  })
+}
 
 export function groupsOf(config: V8Config | undefined, provider: string): ApiKeyGroup[] {
   const groups = config?.['api-keys']?.[provider]
@@ -116,6 +184,8 @@ export interface GroupDraft {
   disableCooling: boolean
   requestRetry: string
   disabled: boolean
+  /** Only takes traffic while no subscription account can; the console then owns priority and the ALL_MODELS exclusion. */
+  fallback: boolean
   keys: KeyDraft[]
 }
 
@@ -142,7 +212,7 @@ export function keyToDraft(k?: ApiKeyEntry): KeyDraft {
   return { id: rowId(), apiKey: apiKey ?? '', weight: str(weight), proxyUrl: str(proxyUrl), extra }
 }
 
-export function toDraft(g: ApiKeyGroup | undefined, provider: string): GroupDraft {
+export function toDraft(g: ApiKeyGroup | undefined, provider: string, fallback = false): GroupDraft {
   const meta = API_KEY_PROVIDERS.find((p) => p.id === provider)
   return {
     name: g?.name ?? '',
@@ -152,10 +222,11 @@ export function toDraft(g: ApiKeyGroup | undefined, provider: string): GroupDraf
     proxyUrl: str(g?.['proxy-url']),
     headers: Object.entries(g?.headers ?? {}).map(([a, b]) => ({ id: rowId(), a, b })),
     models: (g?.models ?? []).map(({ name, alias, ...extra }) => ({ id: rowId(), a: name, b: alias, extra })),
-    excluded: g?.['excluded-models'] ?? [],
+    excluded: (g?.['excluded-models'] ?? []).filter((m) => !fallback || m.trim() !== ALL_MODELS),
     disableCooling: g?.['disable-cooling'] === true,
     requestRetry: str(g?.['request-retry']),
     disabled: g?.disabled === true,
+    fallback,
     keys: g ? (g.keys ?? []).map(keyToDraft) : [keyToDraft()],
   }
 }
@@ -167,7 +238,7 @@ export function validateDraft(d: GroupDraft, provider: string): string | null {
   if (compat && !d.name.trim()) return 'Name is required.'
   if (PROVIDER_INFO[provider as ProviderId]?.baseUrlRequired && !d.baseUrl.trim()) return 'Base URL is required.'
   if (d.baseUrl.trim() && !/^https?:\/\/\S+$/.test(d.baseUrl.trim())) return 'Base URL must start with http:// or https://.'
-  if (d.priority.trim() && !isInt(d.priority)) return 'Priority must be a whole number.'
+  if (!d.fallback && d.priority.trim() && !isInt(d.priority)) return 'Priority must be a whole number.'
   if (d.requestRetry.trim() && !(isInt(d.requestRetry) && Number(d.requestRetry) >= 0)) return 'Request retry must be 0 or more.'
   if (d.models.some((m) => m.b.trim() && !m.a.trim())) return 'Each model alias needs an upstream model name.'
   const keys = d.keys.filter((k) => k.apiKey.trim())
@@ -201,14 +272,20 @@ export function fromDraft(d: GroupDraft, provider: string, original?: ApiKeyGrou
   if (compat && d.disabled) g.disabled = true
   set('base-url', d.baseUrl.trim())
   set('prefix', d.prefix.trim())
-  set('priority', d.priority.trim() ? Number(d.priority) : null)
+  if (d.fallback) {
+    // The console keeps it below every account; a new group starts below the default 0, standing by.
+    g.priority = original ? (original.priority ?? null) : -1
+    if (g.priority == null) delete g.priority
+  } else set('priority', d.priority.trim() ? Number(d.priority) : null)
   if (!compat) set('proxy-url', d.proxyUrl.trim())
   set('headers', Object.fromEntries(d.headers.filter((h) => h.a.trim()).map((h) => [h.a.trim(), h.b])))
   const models = d.models
     .filter((m) => m.a.trim())
     .map((m) => ({ name: m.a.trim(), ...(m.b.trim() && { alias: m.b.trim() }), ...m.extra }))
   set('models', models)
-  if (!compat) set('excluded-models', d.excluded)
+  // A fallback keeps whether the console has it standing by; one that no longer is goes back in rotation.
+  const standingBy = d.fallback && (!original || (original['excluded-models'] ?? []).some((m) => m.trim() === ALL_MODELS))
+  if (!compat) set('excluded-models', standingBy ? [...d.excluded, ALL_MODELS] : d.excluded)
   if (d.disableCooling) g['disable-cooling'] = true
   else if (original?.['disable-cooling'] === false) g['disable-cooling'] = false
   set('request-retry', d.requestRetry.trim() ? Number(d.requestRetry) : null)

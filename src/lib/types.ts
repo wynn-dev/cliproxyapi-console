@@ -380,6 +380,54 @@ export type ApiKeyUsage = Record<
   Record<string, { success: number; failed: number; recent_requests: RecentBucket[] }>
 >
 
+/** A rate limit from an API key's last response: per minute for Anthropic and OpenAI. */
+export interface KeyRateLimit {
+  limit?: number
+  remaining?: number
+  /** When it is full again: an ISO time (Anthropic) or a duration like "6m0s" (OpenAI). */
+  reset?: string
+}
+
+/** The console's view of one upstream API key (server/fallback.ts apiKeyStatus). */
+export interface ApiKeyInfo {
+  provider: string
+  /** Its group only takes traffic while no account of the provider can. */
+  fallback: boolean
+  /** False while the group excludes every model, i.e. a fallback standing by. */
+  inRotation: boolean
+  /** USD at API list prices, and the 30 days' attempts and tokens. */
+  spend: {
+    day: number
+    week: number
+    month: number
+    sinceBalance: number
+    requests: number
+    failed: number
+    input: number
+    output: number
+    cached: number
+    unpricedTokens: number
+  }
+  balance?: { set: number; at: number; spent: number; left: number }
+  outOfCredits?: { at: number; error: string }
+  lastOkAt?: number
+  limits?: { at: number } & Partial<Record<'requests' | 'tokens' | 'input-tokens' | 'output-tokens', KeyRateLimit>>
+}
+
+export interface FallbackState {
+  active: boolean
+  available: number
+  until?: number
+  outOfCredits: boolean
+}
+
+export interface ApiKeysStatus {
+  /** By auth_index. */
+  keys: Record<string, ApiKeyInfo>
+  /** By provider, for providers with a fallback group. */
+  fallback: Record<string, FallbackState>
+}
+
 export interface LogsResponse {
   lines: string[]
   'line-count': number

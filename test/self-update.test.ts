@@ -11,6 +11,7 @@ const { appDirs, installNext, resetProgress, rollback, satisfies, startRollback,
   '../server/self-update.ts'
 )
 const { launchdPlist, plistNode, systemdUnit, unitNode } = await import('../server/service.ts')
+const { DOWN_MS, pollsDown } = await import('../src/lib/update-poll.ts')
 
 const dirs = appDirs(data)
 after(() => fs.rmSync(data, { recursive: true, force: true }))
@@ -203,6 +204,27 @@ describe('satisfies', () => {
   ]
   for (const [v, r] of yes) test(`${v} satisfies ${r}`, () => assert.ok(satisfies(v, r)))
   for (const [v, r] of no) test(`${v} does not satisfy ${r}`, () => assert.ok(!satisfies(v, r)))
+})
+
+describe('the update dialog takes failing polls as the restart', () => {
+  test('after installing or verifying, once they fail for a while', () => {
+    assert.equal(pollsDown('installing', true, DOWN_MS, 0), true)
+    assert.equal(pollsDown('verifying', true, DOWN_MS, 0), true)
+  })
+
+  test('not on a single failed poll', () => {
+    assert.equal(pollsDown('installing', true, 1000, 0), false)
+    assert.equal(pollsDown('verifying', true, 1000, 0), false)
+  })
+
+  test('not once a poll answers again', () => {
+    assert.equal(pollsDown('installing', false, DOWN_MS, 0), false)
+  })
+
+  test('not after the update failed or before one ran', () => {
+    assert.equal(pollsDown('failed', true, DOWN_MS, 0), false)
+    assert.equal(pollsDown(undefined, true, DOWN_MS, 0), false)
+  })
 })
 
 async function waitFor(done: () => boolean) {

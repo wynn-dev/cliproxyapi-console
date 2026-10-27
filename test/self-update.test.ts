@@ -7,7 +7,10 @@ import { after, beforeEach, describe, test } from 'node:test'
 // paths are fixed when env.ts loads, so point the data dir at a scratch dir before importing.
 const data = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-self-update-test-'))
 process.env.CPA_CONSOLE_DATA = data
-const { appDirs, installNext, resetProgress, rollback, satisfies, startUpdate, swap, updateProgress, versionIn } = await import('../server/self-update.ts')
+const { appDirs, installNext, resetProgress, rollback, satisfies, startRollback, startUpdate, swap, updateProgress, versionIn } = await import(
+  '../server/self-update.ts'
+)
+const { launchdPlist, plistNode, systemdUnit, unitNode } = await import('../server/service.ts')
 
 const dirs = appDirs(data)
 after(() => fs.rmSync(data, { recursive: true, force: true }))
@@ -141,6 +144,37 @@ describe('rollback', () => {
     await assert.rejects(rollback(opts), /does not start/)
     assert.equal(versionIn(dirs.app), '0.1.0-nightly.1')
     assert.equal(versionIn(dirs.prev), '0.1.0-nightly.0')
+  })
+
+  test('refuses a rollback or an update while a rollback checks app-prev', async () => {
+    fakePackage(dirs.prev, '0.1.0-nightly.0')
+    let restarts = 0
+    const first = startRollback(() => restarts++, opts)
+    // The first is still running app-prev's --version.
+    await assert.rejects(startRollback(() => restarts++, opts), /already in progress/)
+    assert.throws(() => startUpdate('0.1.0-nightly.2', () => restarts++, { ...opts, install: installs() }), /already in progress/)
+    assert.equal((await first).phase, 'restarting')
+    assert.equal(restarts, 1)
+    assert.equal(versionIn(dirs.app), '0.1.0-nightly.0')
+    assert.equal(versionIn(dirs.prev), '0.1.0-nightly.1')
+  })
+
+  test('a failed rollback leaves the console free to update', async () => {
+    fakePackage(dirs.prev, '0.1.0-nightly.0', { broken: true })
+    await assert.rejects(startRollback(() => {}, opts), /does not start/)
+    assert.equal(startUpdate('0.1.0-nightly.2', () => {}, { ...opts, install: installs() }).phase, 'installing')
+    await waitFor(() => updateProgress()?.phase !== 'installing' && updateProgress()?.phase !== 'verifying')
+  })
+})
+
+describe('service', () => {
+  test('reads the Node a systemd unit runs with', () => {
+    assert.equal(unitNode(systemdUnit('/data/app/cli.js')), process.execPath)
+  })
+
+  test('reads the Node a launchd plist runs with', () => {
+    assert.equal(plistNode(launchdPlist('/data/app/cli.js')), process.execPath)
+    assert.equal(plistNode(launchdPlist('/data/app/cli.js').replace(process.execPath, '/opt/a&amp;b/node')), '/opt/a&b/node')
   })
 })
 

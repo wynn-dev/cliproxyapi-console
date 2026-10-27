@@ -98,9 +98,13 @@ export function ConsoleVersion({ version }: { version?: string }) {
 /** Gives up waiting for the console to come back after this long, and says where to look. */
 const RECONNECT_MS = 2 * 60_000
 
+/** How long polls fail after the check before that is taken as the restart, not a blip. */
+const DOWN_MS = 10_000
+
 /** Update and Roll back for a service install: progress, then a reconnecting state until the new version answers. */
 function SelfUpdateDialog({ data, outdated }: { data: ConsoleLatest; outdated: boolean }) {
   const qc = useQueryClient()
+  const [opened] = useState(Date.now)
   // Started here, or already running when the dialog opened.
   const [watching, setWatching] = useState(data.progress?.phase === 'installing' || data.progress?.phase === 'verifying')
 
@@ -108,8 +112,8 @@ function SelfUpdateDialog({ data, outdated }: { data: ConsoleLatest; outdated: b
     queryKey: ['console', 'update'],
     queryFn: () => consoleApi<SelfUpdate>('/console/update'),
     enabled: watching,
-    refetchInterval: (q) => (q.state.data?.progress?.phase === 'restarting' || q.state.error ? false : 1000),
-    // The console going down mid-poll is the restart.
+    // Polls on through a failed poll (a network blip, a proxy hiccup); it is not the restart by itself.
+    refetchInterval: (q) => (q.state.data?.progress?.phase === 'restarting' || (q.state.data && !q.state.data.progress) ? false : 1000),
     retry: false,
   })
   const update = useMutation({
@@ -124,9 +128,14 @@ function SelfUpdateDialog({ data, outdated }: { data: ConsoleLatest; outdated: b
     onSuccess: (p) => qc.setQueryData(['console', 'update'], { ...data, progress: p }),
   })
 
-  const p = rollback.data || (watching ? (progress.data?.progress ?? update.data) : undefined)
-  // The server answers once more before it exits; a poll it can't answer means it went down.
-  const restarting = p?.phase === 'restarting' || (watching && p?.phase !== 'failed' && !!progress.error)
+  const p = rollback.data || (watching ? (progress.data?.progress ?? update.data ?? data.progress ?? undefined) : undefined)
+  // The server answers once more before it exits, if a poll comes in time. Otherwise the restart shows as a console that
+  // answers without the update (a new process; Reconnecting then waits for the new version), or as polls failing for a
+  // while after the check, which the swap and the exit follow.
+  const fresh = watching && !!progress.data && !progress.data.progress
+  const down =
+    watching && !!progress.error && p?.phase === 'verifying' && progress.errorUpdatedAt - Math.max(progress.dataUpdatedAt, opened) >= DOWN_MS
+  const restarting = p?.phase === 'restarting' || fresh || down
   const running = watching && !restarting && p?.phase !== 'failed'
 
   if (restarting && p) return <Reconnecting version={p.version} />

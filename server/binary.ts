@@ -68,6 +68,15 @@ export async function latestRelease(force = false): Promise<ReleaseInfo> {
   return info
 }
 
+/** A release tag such as v6.1.2 or v6.1.2-rc.1. It goes into a download URL and a file name, so nothing else passes. */
+const TAG = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/
+
+export function validateTag(tag: unknown): asserts tag is string {
+  if (typeof tag !== 'string' || !TAG.test(tag)) {
+    throw new Error(`Invalid CLIProxyAPI release tag ${JSON.stringify(tag)}; expected a version like v6.1.2`)
+  }
+}
+
 let progress: InstallProgress | undefined
 export const installProgress = () => progress
 
@@ -79,10 +88,17 @@ export function failInstall(err: unknown) {
 
 /**
  * Downloads, checksum-verifies and installs a CPA release. `beforeSwap` runs right before the
- * binary is replaced (stop CPA there; Windows cannot overwrite a running executable).
+ * binary is replaced (stop CPA there; Windows cannot overwrite a running executable). The binary it
+ * replaces is kept as `<binaryPath>.old`, so a bad release can be rolled back by hand.
  */
 export async function installRelease(tag: string, beforeSwap?: () => Promise<void>) {
   if (progress && !['done', 'error'].includes(progress.phase)) throw new Error('An install is already running')
+  try {
+    validateTag(tag)
+  } catch (err) {
+    progress = { tag: String(tag), phase: 'error', received: 0, total: 0, error: (err as Error).message }
+    throw err
+  }
   progress = { tag, phase: 'downloading', received: 0, total: 0 }
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cpa-install-'))
   try {
@@ -125,6 +141,7 @@ export async function installRelease(tag: string, beforeSwap?: () => Promise<voi
     fs.copyFileSync(extracted, staged)
     fs.chmodSync(staged, 0o755)
     await beforeSwap?.()
+    if (fs.existsSync(binaryPath)) fs.copyFileSync(binaryPath, `${binaryPath}.old`)
     fs.renameSync(staged, binaryPath)
     updateState({ cpaVersion: tag })
     progress.phase = 'done'

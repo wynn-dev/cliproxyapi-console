@@ -96,7 +96,8 @@ The console is a rolling nightly: every merge to `main` publishes a new build to
 When a newer build exists, the console's sidebar shows **Update available** with the exact command, including any
 `--data`, `--port` or `--host` options the console runs with. For a service, that re-runs `service install`, which
 reinstalls the latest nightly and keeps your data. For a foreground run, stop the console and run the npx command
-again; npx fetches the new build. CLIProxyAPI itself updates from the Overview page.
+again; npx fetches the new build. CLIProxyAPI itself updates from the Overview page; the binary it replaces is kept
+as `bin/cli-proxy-api.old` in the data directory, so you can stop CPA and move it back if a release misbehaves.
 
 ### Options
 

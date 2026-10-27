@@ -28,6 +28,8 @@ export const env = {
   dev: process.env.NODE_ENV === 'development',
   /** Set by `service install`, so the UI can tell how this console is updated. */
   service: process.env.CPA_CONSOLE_SERVICE === '1',
+  /** Turns off updating the console from its UI: the button is hidden and the endpoints refuse. */
+  updateDisabled: ['1', 'true'].includes(process.env.CPA_CONSOLE_DISABLE_UPDATE ?? ''),
 }
 
 export const CPA_REPO = 'router-for-me/CLIProxyAPI'

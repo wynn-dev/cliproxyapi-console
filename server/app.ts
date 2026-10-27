@@ -18,7 +18,9 @@ import { fableStatus } from './fable.ts'
 import { apiKeyStatus, setBalance, setFallback } from './fallback.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
 import { type ReserveLimits, reserveStatus, setHoldExtraUsage, setReleaseWhenAllHeld, setReserveLimits } from './reserve.ts'
+import { appDirs, isVersion, startRollback, startUpdate, unsupportedReason, updateProgress, versionIn } from './self-update.ts'
 import { share, snapshot } from './share.ts'
+import { shutdown } from './shutdown.ts'
 import { signInResult, signInWarnings, watchSignIn } from './sign-in.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
@@ -351,7 +353,48 @@ app.get('/console/api/console/latest', async (c) => {
       return c.json({ error: `Could not check for console updates: ${(err as Error).message}` }, 502)
     }
   }
-  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, command: consoleCommand() })
+  return c.json({ current: pkg.version, latest: consoleLatest.version, service: env.service, command: consoleCommand(), ...selfUpdate() })
+})
+
+/** Exit code that makes the service manager start the console again (systemd restarts on failure). */
+const RESTART_EXIT = 75
+
+/** Whether Update installs from here, the version a rollback restores, and any update in progress. */
+function selfUpdate() {
+  const reason = unsupportedReason()
+  return {
+    canUpdate: !reason,
+    previous: reason ? null : (versionIn(appDirs().prev) ?? null),
+    progress: updateProgress() ?? null,
+  }
+}
+
+// Answered first, so the browser hears it before the console goes down.
+const restartSoon = () => setTimeout(() => void shutdown(RESTART_EXIT), 500)
+
+app.get('/console/api/console/update', (c) => c.json(selfUpdate()))
+
+app.post('/console/api/console/update', async (c) => {
+  const reason = unsupportedReason()
+  if (reason) return c.json({ error: reason }, 403)
+  const { version } = await c.req.json<{ version?: unknown }>().catch(() => ({ version: undefined }))
+  if (!isVersion(version)) return c.json({ error: 'version must be a version such as 0.1.0-nightly.12' }, 400)
+  if (version === pkg.version) return c.json({ error: `Already on ${version}` }, 409)
+  try {
+    return c.json(startUpdate(version, restartSoon), 202)
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 409)
+  }
+})
+
+app.post('/console/api/console/rollback', async (c) => {
+  const reason = unsupportedReason()
+  if (reason) return c.json({ error: reason }, 403)
+  try {
+    return c.json(await startRollback(restartSoon), 202)
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 409)
+  }
 })
 
 app.get('/console/api/release/latest', async (c) => {

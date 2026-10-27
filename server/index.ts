@@ -3,9 +3,9 @@ import { serve } from '@hono/node-server'
 import { startAccessLog } from './access-log.ts'
 import { app, ensureInstalledAndStart, setupToken } from './app.ts'
 import { env, paths } from './env.ts'
-import { flushLimitHistory } from './limit-history.ts'
 import { startLimitChecks } from './limit-checks.ts'
 import { startLimitRecorder } from './limits.ts'
+import { shutdown } from './shutdown.ts'
 import { supervisor } from './supervisor.ts'
 import { consoleUrls } from './urls.ts'
 import { startCollector } from './usage.ts'
@@ -45,14 +45,6 @@ export async function startServer({ open = false } = {}) {
   })
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(signal, async () => {
-      try {
-        flushLimitHistory(true)
-      } catch (err) {
-        console.error(`Could not save limit history: ${err instanceof Error ? err.message : err}`)
-      }
-      await supervisor.stop()
-      process.exit(0)
-    })
+    process.once(signal, () => shutdown(0))
   }
 }

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { PACKAGE, env, paths } from './env.ts'
+import { appDirs, rollback } from './self-update.ts'
 import { consoleUrls } from './urls.ts'
 
 /** Installs the console as a background service: systemd on Linux, launchd on macOS. */
@@ -27,7 +28,7 @@ const launchdTarget = () => `gui/${process.getuid?.()}`
  * checkout, it is the local build.
  */
 function installedEntry() {
-  const app = path.join(paths.data, 'app')
+  const { app, next, prev } = appDirs()
   const fromSource = path.basename(path.dirname(paths.root)) !== 'node_modules'
   let spec = `${PACKAGE}@latest`
   let tmp: string | undefined
@@ -42,6 +43,9 @@ function installedEntry() {
 
   console.log(fromSource ? '  Installing this build into the data directory…' : '  Installing the latest nightly into the data directory…')
   fs.rmSync(app, { recursive: true, force: true })
+  // A version kept by an earlier in-UI update is not the one this install replaces, so Roll back must not offer it.
+  fs.rmSync(prev, { recursive: true, force: true })
+  fs.rmSync(next, { recursive: true, force: true })
   fs.mkdirSync(app, { recursive: true })
   fs.writeFileSync(path.join(app, 'package.json'), '{ "private": true }\n')
   try {
@@ -62,7 +66,7 @@ function environment(): Record<string, string> {
   return vars
 }
 
-function systemdUnit(entry: string) {
+export function systemdUnit(entry: string) {
   const vars = Object.entries(environment())
     .map(([k, v]) => `Environment=${k}=${v}`)
     .join('\n')
@@ -85,7 +89,7 @@ WantedBy=${isRoot() ? 'multi-user.target' : 'default.target'}
 `
 }
 
-function launchdPlist(entry: string) {
+export function launchdPlist(entry: string) {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
   const vars = Object.entries(environment())
     .map(([k, v]) => `    <key>${k}</key><string>${esc(v)}</string>`)
@@ -177,8 +181,17 @@ export function uninstallService(quiet = false) {
 /** Switches the service back to the console version it ran before its last update, and restarts it. */
 export async function rollbackService() {
   assertSupported()
-  const { rollback } = await import('./self-update.ts')
-  const version = await rollback()
+  // Checked against the Node the service runs, not the one running this command (npx's).
+  const node = serviceNode()
+  let nodeVersion: string | undefined
+  if (node) {
+    try {
+      nodeVersion = execFileSync(node, ['-p', 'process.versions.node'], { encoding: 'utf8' }).trim()
+    } catch {
+      throw new Error(`The service's Node (${node}) does not run.`)
+    }
+  }
+  const version = await rollback({ node, nodeVersion })
   console.log(`  Switched the service's install to ${version}.`)
   if (process.platform === 'linux' ? !fs.existsSync(unitPath()) : !fs.existsSync(plistPath())) {
     return console.log('  The service is not installed, so nothing was restarted.')
@@ -188,6 +201,25 @@ export async function rollbackService() {
   console.log(`  Restarted ${NAME}.`)
   await printWhenReady()
 }
+
+/** The Node the installed service runs with, if it is installed. */
+function serviceNode() {
+  try {
+    return process.platform === 'linux' ? unitNode(fs.readFileSync(unitPath(), 'utf8')) : plistNode(fs.readFileSync(plistPath(), 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+/** The program a systemd unit's ExecStart runs, as systemdUnit() writes it. */
+export const unitNode = (unit: string) => unit.match(/^ExecStart=(\S+)/m)?.[1]
+
+/** The program a launchd plist runs, as launchdPlist() writes it. */
+export const plistNode = (plist: string) =>
+  plist
+    .match(/<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/)?.[1]
+    ?.replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&')
 
 export function serviceStatus() {
   assertSupported()

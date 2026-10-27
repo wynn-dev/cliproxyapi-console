@@ -182,7 +182,10 @@ export const updateProgress = () => progress
 /** Forgets the last update, as a restart does. */
 export const resetProgress = () => void (progress = undefined)
 
-const busy = () => progress && progress.phase !== 'failed'
+/** A rollback checking app-prev starts, before it reports progress. */
+let rollingBack = false
+
+const busy = () => rollingBack || (progress && progress.phase !== 'failed')
 
 /**
  * Starts installing a version in the background; `restart` runs once it is in place. Progress and
@@ -211,7 +214,14 @@ export function startUpdate(version: string, restart: () => void, opts: Options 
 /** Rolls back to app-prev, then runs `restart`. */
 export async function startRollback(restart: () => void, opts: Options = {}) {
   if (busy()) throw new Error('An update is already in progress')
-  const version = await rollback(opts)
+  // Busy while app-prev is checked, so another rollback or an update can't move the directories meanwhile.
+  rollingBack = true
+  let version: string
+  try {
+    version = await rollback(opts)
+  } finally {
+    rollingBack = false
+  }
   progress = { version, phase: 'restarting', startedAt: Date.now() }
   console.log(`Rolled the console back to ${version}; restarting.`)
   restart()

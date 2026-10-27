@@ -55,8 +55,11 @@ function installedEntry() {
   return path.join(app, 'node_modules', PACKAGE, 'dist-server/cli.js')
 }
 
-function environment() {
-  return { CPA_CONSOLE_DATA: paths.data, PORT: String(env.port), HOST: env.host, CPA_CONSOLE_SERVICE: '1' }
+function environment(): Record<string, string> {
+  const vars: Record<string, string> = { CPA_CONSOLE_DATA: paths.data, PORT: String(env.port), HOST: env.host, CPA_CONSOLE_SERVICE: '1' }
+  // Carried into the service, so `CPA_CONSOLE_DISABLE_UPDATE=1 cliproxyui service install` keeps it off.
+  if (env.updateDisabled) vars.CPA_CONSOLE_DISABLE_UPDATE = '1'
+  return vars
 }
 
 function systemdUnit(entry: string) {
@@ -169,6 +172,21 @@ export function uninstallService(quiet = false) {
     fs.rmSync(plistPath())
   }
   if (!quiet) console.log(`Removed the ${NAME} service. Your data in ${paths.data} was kept.`)
+}
+
+/** Switches the service back to the console version it ran before its last update, and restarts it. */
+export async function rollbackService() {
+  assertSupported()
+  const { rollback } = await import('./self-update.ts')
+  const version = await rollback()
+  console.log(`  Switched the service's install to ${version}.`)
+  if (process.platform === 'linux' ? !fs.existsSync(unitPath()) : !fs.existsSync(plistPath())) {
+    return console.log('  The service is not installed, so nothing was restarted.')
+  }
+  if (process.platform === 'linux') systemctl('restart', NAME)
+  else run('launchctl', ['kickstart', '-k', `${launchdTarget()}/${LABEL}`])
+  console.log(`  Restarted ${NAME}.`)
+  await printWhenReady()
 }
 
 export function serviceStatus() {

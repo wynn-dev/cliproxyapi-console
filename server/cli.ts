@@ -10,6 +10,7 @@ Usage:
   cliproxyui service install    Install and start as a background service (systemd / launchd)
   cliproxyui service uninstall  Remove the background service (keeps your data)
   cliproxyui service status     Show service status
+  cliproxyui service rollback   Switch the service back to the console version before its last update
 
 Options:
   -p, --port <port>   Console port (default 8320, env PORT)
@@ -58,7 +59,8 @@ try {
     if (sub === 'install') await service.installService()
     else if (sub === 'uninstall') service.uninstallService()
     else if (sub === 'status') service.serviceStatus()
-    else throw new Error(`Unknown service command "${sub ?? ''}". Use install, uninstall or status.`)
+    else if (sub === 'rollback') await service.rollbackService()
+    else throw new Error(`Unknown service command "${sub ?? ''}". Use install, uninstall, status or rollback.`)
   } else {
     throw new Error(`Unknown command "${command}".\n\n${HELP}`)
   }

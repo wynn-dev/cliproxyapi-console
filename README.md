@@ -93,17 +93,40 @@ alerts on the status code (set retries to 1, so one slow check doesn't alert); t
 ### Updating
 
 The console is a rolling nightly: every merge to `main` publishes a new build to npm under the default `latest` tag.
-When a newer build exists, the console's sidebar shows **Update available** with the exact command, including any
-`--data`, `--port` or `--host` options the console runs with. For a service, that re-runs `service install`, which
-reinstalls the latest nightly and keeps your data. For a foreground run, stop the console and run the npx command
-again; npx fetches the new build. CLIProxyAPI itself updates from the Overview page; the binary it replaces is kept
-as `bin/cli-proxy-api.old` in the data directory, so you can stop CPA and move it back if a release misbehaves.
+When a newer build exists, the console's sidebar shows **Update available**.
+
+Running as a service, the dialog updates in one click. The console installs that exact build beside the running one, in
+`app-next` in the data directory, and checks it before switching: it must report the right `--version` and its Node
+`engines` must accept the Node the service runs with. If the install or a check fails, the console keeps running the
+current version and the dialog shows why. Otherwise it moves the new build to `app`, keeps the old one as `app-prev`, and
+exits so the service manager starts it again on the new build. The console and CLIProxyAPI are down for a few seconds;
+the dialog reconnects and reloads the page once the new version answers.
+
+**Roll back** in the same dialog (open it from the console version in the sidebar) switches back to `app-prev` and
+restarts. A rollback keeps the version it replaced as `app-prev`, so it can be undone the same way. If the new build
+doesn't come up, roll back on the server:
+
+```sh
+npx cliproxyui service rollback [--data <dir>]
+```
+
+To turn off updating from the UI, set `CPA_CONSOLE_DISABLE_UPDATE=1` when installing the service
+(`CPA_CONSOLE_DISABLE_UPDATE=1 npx cliproxyui service install`, which writes it into the service) or in the service's
+environment. The dialog then shows the command instead, and the update and rollback endpoints refuse.
+
+A foreground run, and a service with in-UI updates turned off, show the exact command instead, including any `--data`,
+`--port` or `--host` options the console runs with. For a service, that re-runs `service install`, which reinstalls the
+latest nightly and keeps your data. For a foreground run, stop the console and run the npx command again; npx fetches
+the new build.
+
+CLIProxyAPI updates separately, from the Overview page; the binary it replaces is kept as `bin/cli-proxy-api.old` in
+the data directory, so you can stop CPA and move it back if a release misbehaves.
 
 ### Options
 
 ```
 cliproxyui [start] [--port 8320] [--host 0.0.0.0] [--data ~/.cpa-console] [--no-open]
-cliproxyui service install|uninstall|status [same options]
+cliproxyui service install|uninstall|status|rollback [same options]
 ```
 
 | Flag | Env | Default | |
@@ -114,6 +137,7 @@ cliproxyui service install|uninstall|status [same options]
 | | `TRUST_PROXY` | | Set to `1` behind a reverse proxy, so failed-login limits apply per client (from `X-Forwarded-For`) |
 | | `USAGE_RETENTION_DAYS` | `90` | How long request history is kept |
 | | `GITHUB_TOKEN` | | Optional; avoids GitHub API rate limits when checking for CPA releases |
+| | `CPA_CONSOLE_DISABLE_UPDATE` | | Set to `1` to turn off updating the console from its UI (see [Updating](#updating)) |
 
 ## Security notes
 
@@ -136,7 +160,8 @@ CPA_CONSOLE_DATA=/tmp/cpa-dev pnpm dev
 printed by the server works there too if you change its port to 5173.
 
 Stack: Vite, React 19, TanStack Router / Query / Table, shadcn/ui (Radix, Tailwind v4) and Recharts; the server is
-Hono on Node, with `node:sqlite` for usage history.
+Hono on Node, with `node:sqlite` for usage history. `pnpm test` runs the tests in `test/` with `node --test`; CI runs
+them on every pull request.
 
 ## License
 

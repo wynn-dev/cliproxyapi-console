@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Spinner } from '@/components/ui/spinner'
 import { consoleApi } from '@/lib/api'
 import type { ConsoleState } from '@/lib/types'
+import { pollsDown } from '@/lib/update-poll'
 
 interface UpdateProgress {
   version: string
@@ -98,9 +99,6 @@ export function ConsoleVersion({ version }: { version?: string }) {
 /** Gives up waiting for the console to come back after this long, and says where to look. */
 const RECONNECT_MS = 2 * 60_000
 
-/** How long polls fail after the check before that is taken as the restart, not a blip. */
-const DOWN_MS = 10_000
-
 /** Update and Roll back for a service install: progress, then a reconnecting state until the new version answers. */
 function SelfUpdateDialog({ data, outdated }: { data: ConsoleLatest; outdated: boolean }) {
   const qc = useQueryClient()
@@ -131,10 +129,9 @@ function SelfUpdateDialog({ data, outdated }: { data: ConsoleLatest; outdated: b
   const p = rollback.data || (watching ? (progress.data?.progress ?? update.data ?? data.progress ?? undefined) : undefined)
   // The server answers once more before it exits, if a poll comes in time. Otherwise the restart shows as a console that
   // answers without the update (a new process; Reconnecting then waits for the new version), or as polls failing for a
-  // while after the check, which the swap and the exit follow.
+  // while, which the swap and the exit follow.
   const fresh = watching && !!progress.data && !progress.data.progress
-  const down =
-    watching && !!progress.error && p?.phase === 'verifying' && progress.errorUpdatedAt - Math.max(progress.dataUpdatedAt, opened) >= DOWN_MS
+  const down = watching && pollsDown(p?.phase, !!progress.error, progress.errorUpdatedAt, Math.max(progress.dataUpdatedAt, opened))
   const restarting = p?.phase === 'restarting' || fresh || down
   const running = watching && !restarting && p?.phase !== 'failed'
 

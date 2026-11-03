@@ -256,6 +256,8 @@ export interface OrderPlacement {
   releaseAt?: number
   /** The account's own priority, the first sort key; restored when the feature is turned off. */
   original: number
+  /** The provider's accounts don't all have the same own priority, so the weekly reset only orders those that do. */
+  ownDiffers: boolean
   /** The priority the console gives it in CPA. */
   effective: number
 }

@@ -135,7 +135,15 @@ export function orderReason(p: OrderPlacement, now: number, affinity: boolean) {
   const title = p.rank === 1 ? 'Used first' : `${ordinal(p.rank)} in line`
   if (p.tier === 'unknown' || p.weeklyResetsAt === undefined) return { title, detail: 'No weekly reading yet.' }
   const left = fmtDuration(Math.max(0, p.weeklyResetsAt - now))
+  // The own priority comes before the reset, so the first account need not reset soonest.
+  if (p.ownDiffers) return { title, detail: `Your priority ${p.original} comes before the weekly reset, which is in ${left}.` }
   return { title, detail: p.rank === 1 ? `Its weekly limit resets soonest, in ${left}.` : `Its weekly limit resets in ${left}.` }
+}
+
+/** Why an account in the order isn't where its weekly reset alone would put it, shown next to it. */
+export function orderAside(p: OrderPlacement) {
+  if (p.tier === 'held') return 'held'
+  return [p.ownDiffers && `your priority ${p.original}`, p.tier === 'unknown' && 'no weekly reading'].filter(Boolean).join(', ') || undefined
 }
 
 export function cooldownLabel(cd: Cooldown) {

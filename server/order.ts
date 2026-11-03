@@ -40,6 +40,8 @@ export interface OrderPlacement {
   releaseAt?: number
   /** The account's own priority, the first sort key; restored when the feature is off. */
   original: number
+  /** The provider's accounts don't all have the same own priority, so the weekly reset only orders those that do. */
+  ownDiffers: boolean
   /** The priority the console gives it in CPA. */
   effective: number
 }
@@ -256,9 +258,10 @@ export async function applyOrder(files: Listed[], readings: Record<string, Limit
     // Counted up from the lowest own priority, so accounts stay above a fallback the user put below them (e.g. an API key at -1).
     const base = Math.min(...accounts.map((a) => a.row.original))
     const ranked = rank(accounts)
+    const ownDiffers = new Set(accounts.map((a) => a.row.original)).size > 1
     for (const [i, { f, row, current, p }] of ranked.entries()) {
       const priority = base + ranked.length - 1 - i
-      next[f.name] = { ...p, rank: i + 1, of: ranked.length, original: row.original, effective: priority }
+      next[f.name] = { ...p, rank: i + 1, of: ranked.length, original: row.original, ownDiffers, effective: priority }
       if (current === priority && row.priority === priority && !row.pending) continue
       await attempt(f.name, async () => {
         const previous = row.priority === priority ? row.previous : row.priority

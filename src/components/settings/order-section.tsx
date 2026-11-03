@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { InfoIcon } from 'lucide-react'
-import { accountName } from '@/components/credentials/lib'
+import { accountName, orderAside } from '@/components/credentials/lib'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { providerLabel } from '@/lib/providers'
 import { queries, useOrderWrite } from '@/lib/queries'
@@ -22,12 +22,12 @@ export function OrderSection({ onDirty }: { onDirty: DirtyReporter }) {
 
   // Current order per provider, first to last.
   const names = new Map((credentials.data?.files ?? []).map((c) => [c.name, { name: accountName(c), provider: c.provider }]))
-  const lines = new Map<string, { name: string; held: boolean }[]>()
+  const lines = new Map<string, { name: string; held: boolean; aside?: string }[]>()
   for (const [file, p] of Object.entries(data?.accounts ?? {}).sort(([, a], [, b]) => a.rank - b.rank)) {
     const c = names.get(file)
     if (!c) continue
     const line = lines.get(c.provider) ?? []
-    line.push({ name: c.name, held: p.tier === 'held' })
+    line.push({ name: c.name, held: p.tier === 'held', aside: orderAside(p) })
     lines.set(c.provider, line)
   }
 
@@ -72,7 +72,7 @@ export function OrderSection({ onDirty }: { onDirty: DirtyReporter }) {
                     <li key={a.name} className={a.held ? 'text-muted-foreground' : undefined}>
                       {i > 0 && <span className="mr-1.5 text-muted-foreground">→</span>}
                       <span className="break-all">{a.name}</span>
-                      {a.held && ' (held)'}
+                      {a.aside && <span className="text-muted-foreground"> ({a.aside})</span>}
                     </li>
                   ))}
                 </ol>

@@ -87,7 +87,7 @@ export function UsageFilterBar({ facets, labels }: { facets?: UsageFacets; label
         >
           {Object.entries(RANGES).map(([k, r]) => (
             <ToggleGroupItem key={k} value={k} aria-label={r.label} className="px-3 tabular">
-              {k}
+              {k === 'all' ? 'All' : k}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>

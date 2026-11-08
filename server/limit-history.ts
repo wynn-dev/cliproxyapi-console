@@ -1,6 +1,5 @@
-import { env } from './env.ts'
 import { limitWindows, type LimitReading } from './limit-windows.ts'
-import { db, onUsageRecords } from './usage.ts'
+import { db, onUsageRecords, retentionCutoff } from './usage.ts'
 
 /**
  * How each account's limits fill up over time, for forecasting when the pool runs out. CPA only
@@ -111,11 +110,16 @@ export function flushLimitHistory(all = false) {
   }
 }
 
+export function pruneLimitHistory() {
+  const cutoff = retentionCutoff()
+  if (cutoff !== undefined) db.prepare('DELETE FROM limit_history WHERE ts < ?').run(cutoff)
+}
+
 let prunedAt = 0
 function prune() {
   if (Date.now() - prunedAt < 6 * 3600_000) return
   prunedAt = Date.now()
-  db.prepare('DELETE FROM limit_history WHERE ts < ?').run(Date.now() - env.usageRetentionDays * 86_400_000)
+  pruneLimitHistory()
 }
 
 /** Usage records name their credential by auth_index; history is kept by file name, like the limits table. */

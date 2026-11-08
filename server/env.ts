@@ -21,7 +21,8 @@ export const paths = {
 export const env = {
   host: process.env.HOST ?? defaults.host,
   port: Number(process.env.PORT ?? defaults.port),
-  usageRetentionDays: Number(process.env.USAGE_RETENTION_DAYS ?? 90),
+  /** Days of request and limit history to keep; unset or 0 keeps it forever. */
+  usageRetentionDays: Number(process.env.USAGE_RETENTION_DAYS ?? 0),
   /** Behind a reverse proxy: rate-limit by the X-Forwarded-For client address instead of the socket. */
   trustProxy: ['1', 'true'].includes(process.env.TRUST_PROXY ?? ''),
   githubToken: process.env.GITHUB_TOKEN?.trim() || undefined,

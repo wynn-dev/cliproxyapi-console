@@ -135,7 +135,7 @@ cliproxyui service install|uninstall|status|rollback [same options]
 | `--host` | `HOST` | `0.0.0.0` | Bind address. Use `127.0.0.1` behind a reverse proxy or SSH tunnel |
 | `--data` | `CPA_CONSOLE_DATA` | `~/.cpa-console` | CPA binary, `config.yaml`, auth files, logs, usage database |
 | | `TRUST_PROXY` | | Set to `1` behind a reverse proxy, so failed-login limits apply per client (from `X-Forwarded-For`) |
-| | `USAGE_RETENTION_DAYS` | `90` | How long request history is kept |
+| | `USAGE_RETENTION_DAYS` | | Days of request and limit history to keep; unset or `0` keeps it forever |
 | | `GITHUB_TOKEN` | | Optional; avoids GitHub API rate limits when checking for CPA releases |
 | | `CPA_CONSOLE_DISABLE_UPDATE` | | Set to `1` to turn off updating the console from its UI (see [Updating](#updating)) |
 

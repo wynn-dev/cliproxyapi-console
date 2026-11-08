@@ -7,10 +7,14 @@ export const RANGES = {
   '7d': { ms: 7 * 86_400_000, label: 'Last 7 days' },
   '30d': { ms: 30 * 86_400_000, label: 'Last 30 days' },
   '90d': { ms: 90 * 86_400_000, label: 'Last 90 days' },
+  all: { ms: Infinity, label: 'All time' },
 } as const
 
 export type RangeKey = keyof typeof RANGES
 export const DEFAULT_RANGE: RangeKey = '24h'
+
+/** Where a range of `ms` ending at `now` starts: the epoch for all time. */
+export const rangeStart = (ms: number, now: number) => Math.max(0, now - ms)
 
 /**
  * URL state of the usage page. Client keys are secrets, so the URL only carries the last
@@ -67,6 +71,7 @@ const BUCKET_NAMES: Record<number, string> = {
   10_800_000: 'per 3 hours',
   21_600_000: 'per 6 hours',
   86_400_000: 'per day',
+  604_800_000: 'per week',
 }
 export const bucketName = (ms: number) => BUCKET_NAMES[ms] ?? ''
 

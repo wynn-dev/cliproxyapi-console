@@ -316,21 +316,25 @@ async function drain() {
   }
 }
 
-function prune() {
-  const cutoff = Date.now() - env.usageRetentionDays * 86_400_000
+/** Rows older than this are pruned; undefined keeps history forever (USAGE_RETENTION_DAYS unset or 0). */
+export const retentionCutoff = () => (env.usageRetentionDays > 0 ? Date.now() - env.usageRetentionDays * 86_400_000 : undefined)
+
+export function pruneUsage() {
+  const cutoff = retentionCutoff()
+  if (cutoff === undefined) return
   db.prepare('DELETE FROM requests WHERE ts < ?').run(cutoff)
   db.prepare('DELETE FROM turned_away WHERE ts < ?').run(cutoff)
 }
 
 export function startCollector() {
-  prune()
+  pruneUsage()
   let busy = false
   setInterval(async () => {
     if (busy) return
     busy = true
     await drain().finally(() => (busy = false))
   }, 5000)
-  setInterval(prune, 6 * 3600_000)
+  setInterval(pruneUsage, 6 * 3600_000)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -466,14 +470,24 @@ export interface Metrics {
   unpricedTokens: number
 }
 
-const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_000, 86_400_000]
+const WEEK = 7 * 86_400_000
+const BUCKETS = [60_000, 300_000, 900_000, 3_600_000, 3 * 3_600_000, 6 * 3_600_000, 86_400_000, WEEK]
+
+/** The first record's time, or undefined without any. Both tables are indexed on ts, so this is a lookup. */
+function oldestTs() {
+  const { ts } = db.prepare('SELECT MIN(ts) AS ts FROM (SELECT MIN(ts) AS ts FROM requests UNION ALL SELECT MIN(ts) FROM turned_away)').get() as { ts: number | null }
+  return ts ?? undefined
+}
 
 export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
   const w = where(f)
   const ta = whereTurnedAway(f)
   const src = source(f.from, f.to)
-  const bucket = BUCKETS.find((b) => (f.to - f.from) / b <= 120) ?? 86_400_000
-  const shift = -tzOffsetMin * 60_000 // align day buckets to the viewer's local midnight
+  // All time asks from the epoch: the chart starts at the first record instead.
+  const from = Math.max(f.from, oldestTs() ?? f.to)
+  const bucket = BUCKETS.find((b) => (f.to - from) / b <= 120) ?? WEEK
+  // Align day buckets to the viewer's local midnight, and weeks to Monday (the epoch was a Thursday).
+  const shift = -tzOffsetMin * 60_000 + (bucket === WEEK ? 3 * 86_400_000 : 0)
   const turnedAway = (col: string) =>
     new Map(
       (db.prepare(`SELECT ${col} AS key, COUNT(*) AS n FROM turned_away WHERE ${ta.sql} GROUP BY 1`).all(...ta.params) as { key: string | number; n: number }[]).map(
@@ -513,7 +527,7 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
     const byT = new Map(rows.map((r) => [r.t, r]))
     const awayByT = turnedAway(`((ts + ${shift}) / ${bucket}) * ${bucket} - ${shift}`)
     const series = []
-    const start = Math.floor((f.from + shift) / bucket) * bucket - shift
+    const start = Math.floor((from + shift) / bucket) * bucket - shift
     for (let t = start; t < f.to; t += bucket) {
       const p = byT.get(t) ?? { t, requests: 0, failed: 0, input: 0, output: 0, cached: 0, cacheWrite: 0, total: 0, avgLatency: null }
       series.push(withTurnedAway(p, awayByT.get(t)))

@@ -5,12 +5,14 @@ import { fmtCompact, fmtMs } from '@/lib/format'
 import type { UsagePoint } from '@/lib/types'
 
 export function bucketLabel(t: number, bucketMs: number) {
+  if (bucketMs >= 7 * 86_400_000) return `Week of ${format(t, 'MMM d, yyyy')}`
   return bucketMs >= 86_400_000 ? format(t, 'MMM d') : bucketMs >= 3_600_000 ? format(t, 'MMM d HH:mm') : format(t, 'HH:mm')
 }
 
 /** X-axis props: clock times within a day or two, local-midnight date ticks for longer sub-day bucketed ranges. */
 function timeAxis(series: UsagePoint[], bucketMs: number) {
   const span = series.length * bucketMs
+  if (bucketMs >= 7 * 86_400_000) return { tickFormatter: (t: number) => format(t, 'MMM d, yyyy') }
   if (bucketMs >= 86_400_000) return { tickFormatter: (t: number) => format(t, 'MMM d') }
   if (span <= 2 * 86_400_000) return { tickFormatter: (t: number) => format(t, 'HH:mm') }
   const ticks = series.filter((p) => new Date(p.t).getHours() === 0 && new Date(p.t).getMinutes() === 0).map((p) => p.t)

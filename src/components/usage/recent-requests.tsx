@@ -14,7 +14,7 @@ import type { UsageRequest } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { ClientKey, type CredentialLabels, CredentialName, ModelName, StatusLabel } from './cells'
 import { RequestSheet } from './request-sheet'
-import { turnedAwayReason } from './search'
+import { rangeStart, turnedAwayReason } from './search'
 
 const PAGE = 50
 
@@ -36,7 +36,7 @@ export function RecentRequests({
     queryFn: ({ pageParam }) => {
       const now = Date.now()
       return consoleApi<UsageRequest[]>('/usage/requests', {
-        query: { ...filters, from: now - rangeMs, to: now + 60_000, limit: PAGE, before: pageParam },
+        query: { ...filters, from: rangeStart(rangeMs, now), to: now + 60_000, limit: PAGE, before: pageParam },
       })
     },
     initialPageParam: undefined as string | undefined,

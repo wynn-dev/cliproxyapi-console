@@ -11,7 +11,7 @@ import { Breakdown } from '@/components/usage/breakdown'
 import type { CredentialLabels } from '@/components/usage/cells'
 import { UsageFilterBar } from '@/components/usage/filter-bar'
 import { RecentRequests } from '@/components/usage/recent-requests'
-import { DEFAULT_RANGE, RANGES, bucketName, filterParams, hasFilters, validateUsageSearch } from '@/components/usage/search'
+import { DEFAULT_RANGE, RANGES, bucketName, filterParams, hasFilters, rangeStart, validateUsageSearch } from '@/components/usage/search'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -36,7 +36,7 @@ function UsagePage() {
   const range = search.range ?? DEFAULT_RANGE
   const rangeMs = RANGES[range].ms
   const now = useNow(range === '1h' ? 30_000 : 60_000)
-  const from = now - rangeMs
+  const from = rangeStart(rangeMs, now)
   const labels = useCredentialLabels()
 
   const facets = useQuery(usageQueries.facets(from, now))
@@ -101,9 +101,9 @@ function UsagePage() {
               </Button>
             ) : (
               <>
-                {range !== '90d' && (
-                  <Button variant="outline" size="sm" onClick={() => navigate({ search: (p) => ({ ...p, range: '90d' }), replace: true })}>
-                    Show last 90 days
+                {range !== 'all' && (
+                  <Button variant="outline" size="sm" onClick={() => navigate({ search: (p) => ({ ...p, range: 'all' }), replace: true })}>
+                    Show all time
                   </Button>
                 )}
                 <Button variant="ghost" size="sm" asChild>
@@ -252,7 +252,7 @@ function CollectorHealth() {
         </span>
       </TooltipTrigger>
       <TooltipContent className="max-w-72">
-        {c.lastError ?? 'The console collects request records from CLIProxyAPI every 5 seconds and keeps them for 90 days.'}
+        {c.lastError ?? 'The console collects request records from CLIProxyAPI every 5 seconds and keeps them in its own database.'}
       </TooltipContent>
     </Tooltip>
   )

@@ -33,7 +33,7 @@ import { consoleApi } from '@/lib/api'
 import { useCredentialLabels } from '@/lib/queries'
 import { accountNames } from '@/lib/share'
 import type { ShareSummary } from '@/lib/types'
-import { accentFor, awards, deriveWrapped, H, W } from '@/lib/wrapped'
+import { accentFor, awards, dayIndex, deriveWrapped, H, W } from '@/lib/wrapped'
 
 export const Route = createFileRoute('/_app/wrapped')({ component: WrappedPage })
 
@@ -49,6 +49,9 @@ function previousMonth(month: string) {
   const d = new Date(y, m - 2, 1)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+
+/** The picker's choice for every month with usage at once. */
+const ALL = 'all'
 
 const monthName = (month: string) => new Date(`${month}-01T00:00`).toLocaleDateString('en', { month: 'long', year: 'numeric' })
 
@@ -73,7 +76,7 @@ function WrappedPage() {
     <>
       <PageHeader
         title="Wrapped"
-        description="A month of traffic as slides to post, or to play as a story. Each one is a 1200×675 image; account names stay hidden unless you show them."
+        description="A month of traffic, or all of it, as slides to post, or to play as a story. Each one is a 1200×675 image; account names stay hidden unless you show them."
         actions={
           list.length > 0 && (
             <Select value={month} onValueChange={setPicked}>
@@ -81,6 +84,7 @@ function WrappedPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={ALL}>All time</SelectItem>
                 {list.map((m) => (
                   <SelectItem key={m} value={m}>
                     {monthName(m)}
@@ -111,21 +115,23 @@ function WrappedPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <Recap key={month} month={month} inProgress={month === current} hasPrevious={list.includes(previousMonth(month))} />
+        <Recap key={month} month={month} oldest={list.at(-1)!} inProgress={month === current} hasPrevious={month !== ALL && list.includes(previousMonth(month))} />
       )}
     </>
   )
 }
 
-function Recap({ month, inProgress, hasPrevious }: { month: string; inProgress: boolean; hasPrevious: boolean }) {
-  const { from, to, days } = monthRange(month)
-  // Fixed for the page's life: the zone for the queries, and today's date for a month so far.
-  const [{ tz, today }] = useState(() => ({ tz: new Date().getTimezoneOffset(), today: new Date().getDate() }))
+/** `month` is "2026-09", or ALL: from the start of `oldest`, the first month with usage, to now. */
+function Recap({ month, oldest, inProgress, hasPrevious }: { month: string; oldest: string; inProgress: boolean; hasPrevious: boolean }) {
+  const allTime = month === ALL
+  // Fixed for the page's life: the zone for the queries, today's date for a month so far, and now for all time.
+  const [{ tz, today, now }] = useState(() => ({ tz: new Date().getTimezoneOffset(), today: new Date().getDate(), now: Date.now() }))
+  const { from, to, days } = allTime ? { ...monthRange(oldest), to: now } : monthRange(month)
   const summary = useQuery({
     queryKey: ['console', 'share', 'summary', from, to],
     queryFn: () => consoleApi<ShareSummary>('/share/summary', { query: { from, to, tz } }),
   })
-  const before = monthRange(previousMonth(month))
+  const before = allTime ? { from, to } : monthRange(previousMonth(month))
   const previous = useQuery({
     queryKey: ['console', 'share', 'summary', before.from, before.to],
     queryFn: () => consoleApi<ShareSummary>('/share/summary', { query: { from: before.from, to: before.to, tz } }),
@@ -143,7 +149,7 @@ function Recap({ month, inProgress, hasPrevious }: { month: string; inProgress: 
     return (
       <Alert variant="destructive">
         <TriangleAlertIcon />
-        <AlertTitle>Could not load {monthName(month)}</AlertTitle>
+        <AlertTitle>Could not load {allTime ? 'all time' : monthName(month)}</AlertTitle>
         <AlertDescription>{summary.error.message}</AlertDescription>
       </Alert>
     )
@@ -152,30 +158,33 @@ function Recap({ month, inProgress, hasPrevious }: { month: string; inProgress: 
 
   const s = { ...summary.data, planPrice: price === undefined ? summary.data.planPrice : price }
   const names = accountNames(s.accounts.map((a) => a.key), labels, showNames)
-  const name = monthName(month)
-  const file = (slide: string) => `cpa-wrapped-${month}-${slide}.png`
-  const w = deriveWrapped(s, month, days)
+  const name = allTime ? 'All time' : monthName(month)
+  const file = (slide: string) => `cpa-wrapped-${allTime ? 'all-time' : month}-${slide}.png`
+  // All time starts on the first day with traffic, not the 1st of its month, and ends today.
+  const start = allTime && s.hours.length ? new Date(s.hours[0].t).setHours(0, 0, 0, 0) : from
+  const w = deriveWrapped(s, allTime ? { from: start, days: dayIndex(start, now) + 1, allTime } : { from, days })
   const earned = awards(s, w)
   // A month of failed requests has rows but no tokens: only the slides that still say something.
   const tokens = s.tokens > 0
   // Not from the query alone: a disabled query still hands back the month cached from viewing it.
-  const prev = !inProgress && previous.data && previous.data.tokens > 0 ? previous.data : undefined
+  // All time has no month before it to compare with.
+  const prev = !allTime && !inProgress && previous.data && previous.data.tokens > 0 ? previous.data : undefined
 
   const slides = (
     [
-      { id: 'summary', content: <SummarySlide s={s} /> },
+      { id: 'summary', content: <SummarySlide s={s} w={w} /> },
       prev && { id: 'versus', content: <VersusSlide s={s} prev={prev} prevName={monthName(previousMonth(month)).split(' ')[0]} /> },
-      { id: 'value', content: <ValueSlide s={s} name={name} /> },
+      { id: 'value', content: <ValueSlide s={s} w={w} name={name} /> },
       tokens && { id: 'models', content: <ModelsSlide s={s} /> },
       (s.providers.length > 1 || s.clients.some((c) => c.name !== 'Other')) && { id: 'stack', content: <StackSlide s={s} /> },
       s.cacheHitRate != null && { id: 'cache', content: <CacheSlide s={s} /> },
-      tokens && { id: 'busiest-day', content: <BusiestDaySlide w={w} month={month} /> },
+      tokens && { id: 'busiest-day', content: <BusiestDaySlide w={w} /> },
       tokens && { id: 'rhythm', content: <RhythmSlide w={w} /> },
-      tokens && { id: 'calendar', content: <CalendarSlide w={w} month={month} of={inProgress ? Math.max(today, w.activeDays) : days} /> },
+      tokens && { id: 'calendar', content: <CalendarSlide w={w} of={inProgress ? Math.max(today, w.activeDays) : w.perDay.length} /> },
       s.sessions.count > 0 && { id: 'conversations', content: <ConversationsSlide s={s} /> },
       tokens && { id: 'numbers', content: <NumbersSlide s={s} w={w} /> },
       s.accounts.length > 0 && { id: 'accounts', content: <AccountsSlide s={s} names={names} /> },
-      earned.length > 0 && { id: 'awards', content: <AwardsSlide awards={earned} /> },
+      earned.length > 0 && { id: 'awards', content: <AwardsSlide awards={earned} allTime={allTime} /> },
     ].filter(Boolean) as { id: string; content: React.ReactNode }[]
   ).map((slide) => ({ ...slide, accent: accentFor(slide.id) }))
 

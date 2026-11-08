@@ -21,7 +21,7 @@ import { PRICES_AS_OF } from '@/lib/prices'
 import { providerLabel } from '@/lib/providers'
 import type { ShareSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { DAY_PARTS, type Award, type Personality, type Wrapped } from '@/lib/wrapped'
+import { DAY_PARTS, dayDate, type Award, type Personality, type Wrapped } from '@/lib/wrapped'
 
 /**
  * The wrapped slides. Each fills the 1072×491 content box of a 1200×675 slide; `--slide` is the
@@ -34,8 +34,9 @@ const ACCENT = 'var(--slide)'
 /** The accent mixed into the muted track: a heat level from 0 (empty) to 1 (the most). */
 const heat = (level: number) => (level <= 0 ? 'var(--muted)' : `color-mix(in oklab, ${ACCENT} ${Math.round(18 + level * 82)}%, var(--muted))`)
 
-const dayLabel = (month: string, day: number, opts: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric' }) =>
-  new Date(`${month}-${String(day + 1).padStart(2, '0')}T00:00`).toLocaleDateString('en', opts)
+/** Day `day` of the wrapped; all time spans years, so it says which. */
+const dayLabel = (w: Wrapped, day: number, opts: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric' }) =>
+  dayDate(w, day).toLocaleDateString('en', w.allTime ? { ...opts, year: 'numeric' } : opts)
 
 function Kicker({ children }: { children: React.ReactNode }) {
   return (
@@ -49,12 +50,12 @@ function Big({ children, className }: { children: React.ReactNode; className?: s
   return <div className={cn('text-[120px] leading-none font-semibold tracking-tight', className)}>{children}</div>
 }
 
-/** The cover, and the image behind "Copy link": the month in one slide. */
-export function SummarySlide({ s }: { s: ShareSummary }) {
+/** The cover, and the image behind "Copy link": the month (or all time) in one slide. */
+export function SummarySlide({ s, w }: { s: ShareSummary; w: Wrapped }) {
   return (
     <div className="flex h-full flex-col justify-between">
       <div className="space-y-4">
-        <Kicker>This month through the proxy</Kicker>
+        <Kicker>{w.allTime ? 'All time' : 'This month'} through the proxy</Kicker>
         <div className="flex items-baseline gap-12">
           <div>
             <Big>{fmtCompact(s.tokens)}</Big>
@@ -67,7 +68,7 @@ export function SummarySlide({ s }: { s: ShareSummary }) {
         </div>
       </div>
       <div className="space-y-4">
-        <div className="text-4xl font-semibold tracking-tight">{valueHeadline(s.value, s.planPrice, 'this month')}</div>
+        <div className="text-4xl font-semibold tracking-tight">{valueHeadline(s.value, s.planPrice, w.allTime ? 'all time' : 'this month')}</div>
         <div className="flex gap-10 text-2xl text-muted-foreground">
           <span>
             Top model <span className="font-medium text-foreground">{s.topModel?.model ?? '—'}</span>
@@ -118,14 +119,18 @@ export function VersusSlide({ s, prev, prevName }: { s: ShareSummary; prev: Shar
   )
 }
 
-export function ValueSlide({ s, name }: { s: ShareSummary; name: string }) {
+export function ValueSlide({ s, w, name }: { s: ShareSummary; w: Wrapped; name: string }) {
+  // All time against what the plan cost over every month it spans.
+  const cost = s.planPrice && s.planPrice * w.months
   return (
     <div className="flex h-full flex-col justify-center gap-6">
       <Kicker>{name} at API prices</Kicker>
       <div className="text-[140px] leading-none font-semibold tracking-tight">{fmtUsd(s.value)}</div>
-      {s.planPrice && <div className="text-4xl">{valueHeadline(s.value, s.planPrice, 'this month')}</div>}
-      {s.planPrice && s.value > s.planPrice && (
-        <div className="text-3xl text-muted-foreground">{(s.value / s.planPrice).toFixed(1)}× what the plan costs</div>
+      {s.planPrice && <div className="text-4xl">{valueHeadline(s.value, s.planPrice, w.allTime ? 'all time' : 'this month')}</div>}
+      {cost && s.value > cost && (
+        <div className="text-3xl text-muted-foreground">
+          {(s.value / cost).toFixed(1)}× {w.allTime ? `what the plan cost over ${w.months === 1 ? '1 month' : `${w.months} months`}` : 'what the plan costs'}
+        </div>
       )}
       <div className="space-y-1 text-xl text-muted-foreground">
         <div>At public API list prices as of {PRICES_AS_OF}</div>
@@ -220,18 +225,24 @@ export function CacheSlide({ s }: { s: ShareSummary }) {
   )
 }
 
-export function BusiestDaySlide({ w, month }: { w: Wrapped; month: string }) {
-  const max = w.perDay[w.busiest] || 1
+/** At most this many bars: past it, each bar adds up a few days. */
+const MAX_BARS = 120
+
+export function BusiestDaySlide({ w }: { w: Wrapped }) {
+  const per = Math.ceil(w.perDay.length / MAX_BARS)
+  const bars = Array.from({ length: Math.ceil(w.perDay.length / per) }, (_, i) => w.perDay.slice(i * per, (i + 1) * per).reduce((a, b) => a + b, 0))
+  const busiest = Math.floor(w.busiest / per)
+  const max = bars[busiest] || 1
   return (
     <div className="flex h-full flex-col gap-6">
       <Kicker>Busiest day</Kicker>
       <div>
-        <div className="text-7xl font-semibold tracking-tight">{dayLabel(month, w.busiest, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+        <div className="text-7xl font-semibold tracking-tight">{dayLabel(w, w.busiest, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
         <div className="mt-3 text-3xl text-muted-foreground">{fmtNumber(w.perDay[w.busiest])} tokens</div>
       </div>
-      <div className="flex min-h-0 flex-1 items-end gap-1.5">
-        {w.perDay.map((n, i) => (
-          <div key={i} className={cn('flex-1 rounded-t', i !== w.busiest && 'bg-muted')} style={{ height: `${Math.max(2, (n / max) * 100)}%`, background: i === w.busiest ? ACCENT : undefined }} />
+      <div className={cn('flex min-h-0 flex-1 items-end', bars.length > 31 ? 'gap-0.5' : 'gap-1.5')}>
+        {bars.map((n, i) => (
+          <div key={i} className={cn('flex-1 rounded-t', i !== busiest && 'bg-muted')} style={{ height: `${Math.max(2, (n / max) * 100)}%`, background: i === busiest ? ACCENT : undefined }} />
         ))}
       </div>
     </div>
@@ -268,7 +279,8 @@ export function RhythmSlide({ w }: { w: Wrapped }) {
           <div className="shrink-0 rounded-2xl bg-muted/60 px-6 py-4 text-right">
             <div className="text-xl text-muted-foreground">Peak hour</div>
             <div className="text-3xl font-semibold tracking-tight">
-              {peak.toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric' })}, {hourLabel(peak.getHours())}
+              {peak.toLocaleDateString('en', w.allTime ? { month: 'short', day: 'numeric', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' })},{' '}
+              {hourLabel(peak.getHours())}
             </div>
             <div className="text-xl text-muted-foreground tabular">{fmtCompact(w.peak!.tokens)} tokens in one hour</div>
           </div>
@@ -294,11 +306,15 @@ export function RhythmSlide({ w }: { w: Wrapped }) {
   )
 }
 
-/** The month as a calendar, colored by tokens, with the longest run of active days outlined. `of` is the days so far. */
-export function CalendarSlide({ w, month, of }: { w: Wrapped; month: string; of: number }) {
+/**
+ * The month as a calendar, colored by tokens, with the longest run of active days outlined. `of` is
+ * the days so far. All time has no month to lay out, so it shows its weeks as columns instead.
+ */
+export function CalendarSlide({ w, of }: { w: Wrapped; of: number }) {
   const max = Math.max(1, ...w.perDay)
   const cells = [...Array.from({ length: w.firstWeekday }, () => null), ...w.perDay.map((n, i) => ({ n, i }))]
   const inStreak = (i: number) => w.streak.days > 1 && i >= w.streak.start && i <= w.streak.end
+  const short = { month: 'short', day: 'numeric' } as const
   return (
     <div className="flex h-full items-center justify-between gap-12">
       <div className="space-y-8">
@@ -308,7 +324,9 @@ export function CalendarSlide({ w, month, of }: { w: Wrapped; month: string; of:
             {w.activeDays}
             <span className="text-6xl text-muted-foreground">/{of}</span>
           </Big>
-          <div className="mt-3 text-3xl text-muted-foreground">days with traffic{of < w.perDay.length && ' so far'}</div>
+          <div className="mt-3 text-3xl text-muted-foreground">
+            days with traffic{w.allTime ? <> <span className="whitespace-nowrap">since {dayLabel(w, 0, short)}</span></> : of < w.perDay.length && ' so far'}
+          </div>
         </div>
         {w.streak.days > 1 && (
           <div className="flex items-center gap-4">
@@ -316,31 +334,87 @@ export function CalendarSlide({ w, month, of }: { w: Wrapped; month: string; of:
             <div>
               <div className="text-4xl font-semibold tracking-tight">{w.streak.days}-day streak</div>
               <div className="text-2xl text-muted-foreground">
-                {dayLabel(month, w.streak.start, { month: 'short', day: 'numeric' })} – {dayLabel(month, w.streak.end, { month: 'short', day: 'numeric' })}
+                {dayLabel(w, w.streak.start, short)} – {dayLabel(w, w.streak.end, short)}
               </div>
             </div>
           </div>
         )}
       </div>
-      <div className="grid shrink-0 grid-cols-7 gap-2.5">
-        {WEEKDAYS.map((d) => (
-          <div key={d} className="pb-1 text-center text-lg text-muted-foreground">
-            {d.slice(0, 2)}
+      {w.allTime ? (
+        <Weeks w={w} cells={cells} max={max} inStreak={inStreak} />
+      ) : (
+        <div className="grid shrink-0 grid-cols-7 gap-2.5">
+          {WEEKDAYS.map((d) => (
+            <div key={d} className="pb-1 text-center text-lg text-muted-foreground">
+              {d.slice(0, 2)}
+            </div>
+          ))}
+          {cells.map((c, k) =>
+            c ? (
+              <div
+                key={k}
+                className={cn('flex size-[54px] items-center justify-center rounded-xl text-lg tabular', c.n / max > 0.6 ? 'text-white' : 'text-muted-foreground')}
+                style={{ background: heat(c.n / max), boxShadow: inStreak(c.i) ? `inset 0 0 0 3px ${ACCENT}` : undefined }}
+              >
+                {c.i + 1}
+              </div>
+            ) : (
+              <div key={k} />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Width the week columns share, beside the numbers. */
+const WEEKS_WIDTH = 600
+
+/** All time's calendar: a column per week, Monday on top, months named above the week they start in. */
+function Weeks({ w, cells, max, inStreak }: { w: Wrapped; cells: ({ n: number; i: number } | null)[]; max: number; inStreak: (i: number) => boolean }) {
+  const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, k) => cells.slice(k * 7, k * 7 + 7))
+  // Down to 2px squares a pixel apart, which fits about four years.
+  const gap = weeks.length > 60 ? 1 : weeks.length > 20 ? 2 : 6
+  const size = Math.max(2, Math.min(54, Math.floor((WEEKS_WIDTH + gap) / weeks.length) - gap))
+  // Each month named over the week of its 1st, and the first week too; a name needs about 40px of room.
+  const starts = weeks.flatMap((week, k) => {
+    const c = week.find((c) => c && (k === 0 || dayDate(w, c.i).getDate() === 1))
+    return c ? [{ k, name: dayDate(w, c.i).toLocaleDateString('en', { month: 'short' }) }] : []
+  })
+  const labels = new Map(starts.filter((m, j) => (j === 0 ? (starts[1]?.k ?? Infinity) : m.k - starts[j - 1].k) * (size + gap) >= 40).map((m) => [m.k, m.name]))
+  return (
+    <div className="flex shrink-0 gap-3">
+      <div className="flex flex-col pt-8" style={{ gap }}>
+        {WEEKDAYS.map((d, i) => (
+          <div key={d} className="flex items-center text-lg text-muted-foreground" style={{ height: size }}>
+            {size >= 18 || i % 2 === 0 ? d.slice(0, 2) : ''}
           </div>
         ))}
-        {cells.map((c, k) =>
-          c ? (
-            <div
-              key={k}
-              className={cn('flex size-[54px] items-center justify-center rounded-xl text-lg tabular', c.n / max > 0.6 ? 'text-white' : 'text-muted-foreground')}
-              style={{ background: heat(c.n / max), boxShadow: inStreak(c.i) ? `inset 0 0 0 3px ${ACCENT}` : undefined }}
-            >
-              {c.i + 1}
+      </div>
+      <div className="flex" style={{ gap }}>
+        {weeks.map((week, k) => (
+          <div key={k} className="flex flex-col" style={{ gap, width: size }}>
+            <div className="h-8 overflow-visible text-lg whitespace-nowrap text-muted-foreground" style={{ marginBottom: -gap }}>
+              {labels.get(k)}
             </div>
-          ) : (
-            <div key={k} />
-          ),
-        )}
+            {week.map((c, d) =>
+              c ? (
+                <div
+                  key={d}
+                  style={{
+                    height: size,
+                    borderRadius: Math.max(1, size / 5),
+                    background: heat(c.n / max),
+                    boxShadow: inStreak(c.i) ? `inset 0 0 0 ${size >= 18 ? 3 : 1}px ${ACCENT}` : undefined,
+                  }}
+                />
+              ) : (
+                <div key={d} style={{ height: size }} />
+              ),
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -377,7 +451,7 @@ export function ConversationsSlide({ s }: { s: ShareSummary }) {
   )
 }
 
-/** The month in comparisons: novels written, War and Peace read, years of reading. */
+/** The month (or all time) in comparisons: novels written, War and Peace read, years of reading. */
 export function NumbersSlide({ s, w }: { s: ShareSummary; w: Wrapped }) {
   const n = w.numbers
   const many = (x: number) => (x >= 10 ? fmtNumber(Math.round(x)) : x >= 1 ? x.toFixed(1) : x.toFixed(2))
@@ -419,10 +493,10 @@ const AWARD_ICONS: Record<string, React.ComponentType<{ className?: string; styl
   ...PERSONALITY_ICONS,
 }
 
-export function AwardsSlide({ awards }: { awards: Award[] }) {
+export function AwardsSlide({ awards, allTime }: { awards: Award[]; allTime: boolean }) {
   return (
     <div className="flex h-full flex-col gap-8">
-      <Kicker>This month's awards</Kicker>
+      <Kicker>{allTime ? 'All-time awards' : "This month's awards"}</Kicker>
       <div className="grid min-h-0 flex-1 grid-cols-2 gap-5">
         {awards.map((a, i) => {
           const Icon = AWARD_ICONS[a.id] ?? GemIcon

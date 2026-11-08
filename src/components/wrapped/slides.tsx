@@ -232,7 +232,8 @@ export function BusiestDaySlide({ w }: { w: Wrapped }) {
   const per = Math.ceil(w.perDay.length / MAX_BARS)
   const bars = Array.from({ length: Math.ceil(w.perDay.length / per) }, (_, i) => w.perDay.slice(i * per, (i + 1) * per).reduce((a, b) => a + b, 0))
   const busiest = Math.floor(w.busiest / per)
-  const max = bars[busiest] || 1
+  // The tallest bar, not the busiest day's: a few quieter days can add up to more than it.
+  const max = Math.max(1, ...bars)
   return (
     <div className="flex h-full flex-col gap-6">
       <Kicker>Busiest day</Kicker>

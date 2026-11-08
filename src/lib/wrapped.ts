@@ -50,7 +50,7 @@ const READING_WPM = 250
 
 export interface Streak {
   days: number
-  /** 0-based days of the month. */
+  /** 0-based days of the wrapped. */
   start: number
   end: number
 }
@@ -61,8 +61,27 @@ export interface Award {
   line: string
 }
 
-export function deriveWrapped(s: ShareSummary, month: string, days: number) {
-  const [y, m] = month.split('-').map(Number)
+/** What a wrapped covers: `days` calendar days from the local midnight `from`, a month or all time. */
+export interface Period {
+  from: number
+  days: number
+  allTime?: boolean
+}
+
+/** Calendar days from the day of `from` to the day of `t`, both local, DST or not. */
+export function dayIndex(from: number, t: number) {
+  const a = new Date(from)
+  const b = new Date(t)
+  return (Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86_400_000
+}
+
+/** Day `i` of the wrapped, as a local date. */
+export function dayDate(w: { from: number }, i: number) {
+  const d = new Date(w.from)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + i)
+}
+
+export function deriveWrapped(s: ShareSummary, { from, days, allTime = false }: Period) {
   const perDay = Array.from({ length: days }, () => 0)
   const byHour = Array.from({ length: 24 }, () => 0)
   // Monday first.
@@ -71,7 +90,8 @@ export function deriveWrapped(s: ShareSummary, month: string, days: number) {
   let weekend = 0
   for (const h of s.hours) {
     const d = new Date(h.t)
-    perDay[d.getDate() - 1] += h.tokens
+    const day = dayIndex(from, h.t)
+    if (day >= 0 && day < days) perDay[day] += h.tokens
     byHour[d.getHours()] += h.tokens
     const weekday = (d.getDay() + 6) % 7
     grid[weekday][d.getHours()] += h.tokens
@@ -103,8 +123,14 @@ export function deriveWrapped(s: ShareSummary, month: string, days: number) {
     perActiveDay: s.requests / Math.max(1, perDay.filter((n) => n > 0).length),
   }
 
+  const first = new Date(from)
+  const last = dayDate({ from }, days - 1)
   return {
-    firstWeekday: (new Date(y, m - 1, 1).getDay() + 6) % 7,
+    from,
+    allTime,
+    /** Calendar months the days touch, 1 for a month: what the plan cost over them is this many plan prices. */
+    months: (last.getFullYear() - first.getFullYear()) * 12 + last.getMonth() - first.getMonth() + 1,
+    firstWeekday: (first.getDay() + 6) % 7,
     perDay,
     busiest,
     byHour,
@@ -123,14 +149,17 @@ export type Wrapped = ReturnType<typeof deriveWrapped>
 const pct = (n: number) => `${Math.round(n * 100)}%`
 const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 
-/** Up to four awards the month earned, the most striking first (four fit the slide). */
+/** Up to four awards the month (or all time) earned, the most striking first (four fit the slide). */
 export function awards(s: ShareSummary, w: Wrapped): Award[] {
   const out: Award[] = []
   const add = (ok: boolean | null | undefined, a: Award) => ok && out.push(a)
   const topShare = s.topModel && s.tokens ? s.topModel.tokens / s.tokens : 0
-  add(s.tokens >= 1e9, { id: 'billion', title: 'Token billionaire', line: `${compact.format(s.tokens)} tokens in one month` })
-  add(s.tokens >= 1e8 && s.tokens < 1e9, { id: 'hundred-million', title: 'Nine-figure month', line: `${compact.format(s.tokens)} tokens and counting` })
-  add(!!s.planPrice && s.value >= s.planPrice * 5, { id: 'value', title: 'Value hunter', line: `${Math.floor(s.value / (s.planPrice ?? 1))}× the plan price in API value` })
+  // All time measures the value against every month of the plan it spans, not one.
+  const planCost = s.planPrice && s.planPrice * w.months
+  add(s.tokens >= 1e9, { id: 'billion', title: 'Token billionaire', line: `${compact.format(s.tokens)} tokens ${w.allTime ? 'all time' : 'in one month'}` })
+  add(s.tokens >= 1e8 && s.tokens < 1e9, { id: 'hundred-million', title: w.allTime ? 'Nine-figure club' : 'Nine-figure month', line: `${compact.format(s.tokens)} tokens and counting` })
+  const times = Math.floor(s.value / (planCost || 1))
+  add(!!planCost && times >= 5, { id: 'value', title: 'Value hunter', line: `${times}× ${w.allTime ? 'what the plan cost' : 'the plan price'} in API value` })
   add(s.cacheHitRate != null && s.cacheHitRate >= 0.85, { id: 'cache', title: 'Cache wizard', line: `${pct(s.cacheHitRate ?? 0)} of input read from cache` })
   add(w.streak.days >= 7, { id: 'streak', title: 'Iron streak', line: `${w.streak.days} days in a row` })
   add(w.personality.share > 0, { id: w.personality.id, title: DAY_PARTS[w.personality.id].title, line: DAY_PARTS[w.personality.id].when })

@@ -43,8 +43,8 @@ export function clientName(userAgent: string) {
 }
 
 /**
- * What the card shows for [from, to): the last 7 days, or a calendar month for the wrapped. tzOffsetMin
- * (Date.getTimezoneOffset) only aligns the hourly series to the viewer's half and quarter hours.
+ * What the card shows for [from, to): the last 7 days, or a calendar month or all time for the wrapped.
+ * tzOffsetMin (Date.getTimezoneOffset) only aligns the hourly series to the viewer's half and quarter hours.
  */
 export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
   const s = usageSummary({ from, to }, 0)
@@ -142,7 +142,6 @@ share.get('/summary', (c) => {
   const to = q.to ? Number(q.to) : Date.now()
   const from = q.from ? Number(q.from) : to - 7 * 86_400_000
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return c.json({ error: 'from and to must be times in ms, from before to' }, 400)
-  if (to - from > 35 * 86_400_000) return c.json({ error: 'At most 35 days at a time' }, 400)
   return c.json(shareSummary(from, to, Number(q.tz) || 0))
 })
 

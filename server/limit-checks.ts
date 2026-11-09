@@ -2,8 +2,10 @@ import fs from 'node:fs'
 import YAML from 'yaml'
 import { paths } from './env.ts'
 import { recordLimitReading } from './limit-history.ts'
+import { forgetReset, limitResets, resetOutcome, resetStatus, saveReset, type ResetOutcome } from './limit-resets.ts'
+import { limitWindows } from './limit-windows.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
-import { management } from './management.ts'
+import { credentialFile, management } from './management.ts'
 import { reserveStatus } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { db } from './usage.ts'
@@ -28,16 +30,22 @@ const backoff = (failures: number) => Math.min(MAX_BACKOFF_MS, STALE_MS * 2 ** f
 
 /**
  * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point one provider's
- * checks at a mock on this machine, reached directly rather than through the account's proxy. Not a
- * user option. So a test never reaches a real provider, setting either one turns off checks for a
- * provider without its own, and any host but this machine turns off that provider's checks.
+ * checks at a mock on this machine, reached directly rather than through the account's proxy, and
+ * CPA_CONSOLE_CLAUDE_RESET_URL does the same for using a limit reset (it stands for
+ * `https://api.anthropic.com`). Not a user option. So a test never reaches a real provider, setting
+ * any of them turns off the calls without their own, and any host but this machine turns that call off.
  */
-const TESTING = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL)
+const TESTING = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL || process.env.CPA_CONSOLE_CLAUDE_RESET_URL)
 
-function endpoint(provider: string, variable: string, real: string) {
+interface Endpoint {
+  url: string
+  direct: boolean
+}
+
+function endpoint(variable: string, real: string, off: string): Endpoint | undefined {
   const override = process.env[variable]
   if (!override && TESTING) {
-    console.error(`Limit check: ${variable} is not set while testing; ${provider} accounts won't be checked.`)
+    console.error(`Limit check: ${variable} is not set while testing; ${off}.`)
     return undefined
   }
   if (!override) return { url: real, direct: false }
@@ -48,14 +56,16 @@ function endpoint(provider: string, variable: string, real: string) {
     // Not a URL: refused below.
   }
   if (host === '127.0.0.1' || host === 'localhost') return { url: override, direct: true }
-  console.error(`Limit check: ${variable} must point at 127.0.0.1 or localhost; ${provider} accounts won't be checked.`)
+  console.error(`Limit check: ${variable} must point at 127.0.0.1 or localhost; ${off}.`)
   return undefined
 }
 
-const ENDPOINTS: Record<string, { url: string; direct: boolean } | undefined> = {
-  claude: endpoint('Claude', 'CPA_CONSOLE_CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage'),
-  codex: endpoint('Codex', 'CPA_CONSOLE_CODEX_USAGE_URL', 'https://chatgpt.com/backend-api/wham/usage'),
+const ENDPOINTS: Record<string, Endpoint | undefined> = {
+  claude: endpoint('CPA_CONSOLE_CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage', "Claude accounts won't be checked"),
+  codex: endpoint('CPA_CONSOLE_CODEX_USAGE_URL', 'https://chatgpt.com/backend-api/wham/usage', "Codex accounts won't be checked"),
 }
+/** Where a Claude limit reset is used: `/api/organizations/<organization>/reset_rate_limits` under it. */
+const RESET_ORIGIN = endpoint('CPA_CONSOLE_CLAUDE_RESET_URL', 'https://api.anthropic.com', "Claude limit resets can't be used")
 
 /** CPA's own defaults (claude_device_profile.go, codex_executor_request.go), used unless config.yaml sets one. */
 const DEFAULT_USER_AGENT = {
@@ -115,11 +125,13 @@ export function setLimitChecks(enabled: boolean) {
 
 /**
  * Each account's last check, by credential file name. `error` and `status` describe the last check
- * when it failed (a 401 or 403 usually means the account's sign-in no longer works).
+ * when it failed (a 401 or 403 usually means the account's sign-in no longer works). `resets` is
+ * what the provider last said about each Claude account's limit reset.
  */
 export function limitCheckStatus() {
   return {
     enabled: limitChecksEnabled(),
+    resets: limitResets(),
     accounts: Object.fromEntries(
       [...rows().values()].map((r) => [
         r.name,
@@ -153,29 +165,47 @@ const plausibleReset = (reset: number | undefined, now: number): reset is number
 /** A percent from 0 to 100, allowing for rounding just over 100; undefined when it isn't one. */
 const percent = (v: number | undefined) => (v !== undefined && v >= 0 && v <= 101 ? Math.min(v, 100) : undefined)
 
+/** The models whose own weekly limit is the Fable window, by the name the usage response gives them (Claude Code's list). */
+const FABLE_MODELS = new Set(['fable', 'fable 5', 'fable 5.1'])
+
 /**
  * Claude's usage response as the `anthropic-ratelimit-unified-*` headers it stands for, or why it
- * can't be used. Only the 5-hour and weekly windows are read: their `utilization` is a percent,
- * where the headers carry a share. Newer responses also list limits with a `percent` whose scale is
- * unconfirmed, so those are left out rather than guessed at. A number that could release a held
- * account wrongly fails the check instead.
+ * can't be used. The 5-hour and weekly windows carry a `utilization` in percent, where the headers
+ * carry a share. A number that could release a held account wrongly fails the check instead.
+ *
+ * The Fable window (`7d_oi` in the headers) is in the `limits` list instead: the `weekly_scoped`
+ * entry for a Fable model, with a `percent` that Claude Code shows as it does `utilization`. It is
+ * left out unless exactly one such entry is valid; a Fable hold then waits for its reset. The
+ * list's other entries are not read.
  */
 export function claudeSignals(body: unknown, now: number): Record<string, string> | string {
   const b = obj(body) ?? {}
+  const window = (id: string, label: string, usage: unknown, resetsAt: unknown) => {
+    const used = percent(num(usage))
+    if (used === undefined) return `no valid ${label} usage`
+    const reset = unixSeconds(resetsAt)
+    // A window that hasn't started has no reset yet. 0% used without a reset can't release a held
+    // account: the reserves only trust a window with a reset time.
+    if (!plausibleReset(reset, now) && !(used === 0 && resetsAt == null)) return `no valid ${label} reset time`
+    return {
+      [`anthropic-ratelimit-unified-${id}-utilization`]: String(used / 100),
+      ...(reset ? { [`anthropic-ratelimit-unified-${id}-reset`]: String(reset) } : {}),
+    }
+  }
   const out: Record<string, string> = {}
   for (const [key, id, label] of [['five_hour', '5h', '5-hour'], ['seven_day', '7d', 'weekly']]) {
     // No 5-hour window running: left out, as nothing has been used.
     if (key === 'five_hour' && b[key] === null) continue
-    const w = obj(b[key])
-    const used = percent(num(w?.utilization))
-    if (used === undefined) return `The answer had no valid ${label} usage`
-    const reset = unixSeconds(w?.resets_at)
-    // A window that hasn't started has no reset yet. 0% used without a reset can't release a held
-    // account: the reserve only trusts a window with a reset time.
-    if (!plausibleReset(reset, now) && !(used === 0 && w?.resets_at == null)) return `The answer had no valid ${label} reset time`
-    out[`anthropic-ratelimit-unified-${id}-utilization`] = String(used / 100)
-    if (reset) out[`anthropic-ratelimit-unified-${id}-reset`] = String(reset)
+    const w = window(id, label, obj(b[key])?.utilization, obj(b[key])?.resets_at)
+    if (typeof w === 'string') return `The answer had ${w}`
+    Object.assign(out, w)
   }
+  const fable = (Array.isArray(b.limits) ? b.limits.map(obj) : []).filter((l) => {
+    const model = obj(obj(l?.scope)?.model)?.display_name
+    return l?.kind === 'weekly_scoped' && typeof model === 'string' && FABLE_MODELS.has(model.toLowerCase())
+  })
+  const w = fable.length === 1 ? window('7d_oi', 'Fable', fable[0]!.percent, fable[0]!.resets_at) : undefined
+  if (typeof w === 'object') Object.assign(out, w)
   return out
 }
 
@@ -249,39 +279,51 @@ function fail(name: string, prev: Row | undefined, now: number, status: number, 
   if (failures === 1) console.error(`Limit check: ${name} failed: ${error}. Trying again less often.`)
 }
 
-async function check(f: Listed, prev: Row | undefined, now: number) {
+/**
+ * One call to a provider as the account, through CPA, which fills in its token. A string says why
+ * it got no answer; undefined that CPA is stopped or restarting, which is not the account's fault.
+ */
+async function call(f: Listed, target: Endpoint, url: string, post?: { data: string; timeoutMs: number }) {
   const provider = f.provider as 'claude' | 'codex'
-  const target = ENDPOINTS[provider]!
   const header: Record<string, string> = { Authorization: 'Bearer $TOKEN$', Accept: 'application/json', 'User-Agent': userAgent(provider) }
   if (provider === 'claude') header['anthropic-beta'] = 'oauth-2025-04-20'
   else {
     header.Originator = 'codex-tui'
     if (f.id_token?.chatgpt_account_id) header['ChatGPT-Account-Id'] = f.id_token.chatgpt_account_id
   }
+  if (post) header['Content-Type'] = 'application/json'
   let res: Response | undefined
   try {
     res = await management('/requests/api-call', {
       method: 'POST',
-      body: { auth_index: f.auth_index, method: 'GET', url: target.url, header, ...(target.direct && { proxy_url: 'direct' }) },
+      body: { auth_index: f.auth_index, method: post ? 'POST' : 'GET', url, header, ...(post && { data: post.data }), ...(target.direct && { proxy_url: 'direct' }) },
+      timeoutMs: post?.timeoutMs,
     })
   } catch (err) {
-    // CPA restarting refuses the connection: not the account's fault. A timeout may be.
+    // CPA restarting refuses the connection. A timeout may be the account's fault.
     const name = (err as Error).name
-    if (name !== 'TimeoutError' && name !== 'AbortError') return
-    return fail(f.name, prev, now, 0, 'No answer within 10 seconds')
+    return name === 'TimeoutError' || name === 'AbortError' ? `No answer within ${(post?.timeoutMs ?? 10_000) / 1000} seconds` : undefined
   }
-  // CPA stopped or restarting: not the account's fault.
-  if (!res) return
+  if (!res) return undefined
   const out = (await res.json().catch(() => ({}))) as { status_code?: number; body?: string; error?: string }
-  if (!res.ok) return fail(f.name, prev, now, 0, `CLIProxyAPI could not make the call: ${out.error ?? `HTTP ${res.status}`}`)
-  const status = out.status_code ?? 0
+  if (!res.ok) return `CLIProxyAPI could not make the call: ${out.error ?? `HTTP ${res.status}`}`
+  return { status: out.status_code ?? 0, body: out.body ?? '' }
+}
+
+async function check(f: Listed, prev: Row | undefined, now: number) {
+  const provider = f.provider as 'claude' | 'codex'
+  const target = ENDPOINTS[provider]!
+  const res = await call(f, target, target.url)
+  if (!res) return
+  if (typeof res === 'string') return fail(f.name, prev, now, 0, res)
+  const { status } = res
   if (status < 200 || status > 299) {
-    const detail = upstreamError(out.body)
+    const detail = upstreamError(res.body)
     return fail(f.name, prev, now, status, `HTTP ${status}${detail ? `: ${detail}` : ''}`)
   }
   let body: unknown
   try {
-    body = JSON.parse(out.body ?? '')
+    body = JSON.parse(res.body)
   } catch {
     return fail(f.name, prev, now, status, 'The answer was not JSON')
   }
@@ -293,6 +335,72 @@ async function check(f: Listed, prev: Row | undefined, now: number) {
   recordLimitReading(f.name, provider, { observed_at: new Date(now).toISOString(), signals: reading })
   saveRow.run(f.name, now, now, 0, 0, '')
   if (prev?.failures) console.log(`Limit check: ${f.name} works again`)
+  if (provider === 'claude') await readReset(f, target, body, reading, now)
+}
+
+/**
+ * Notes whether the account's limit reset is available. The provider says so when asked the way
+ * Claude Code asks once the 5-hour limit is reached, so that is when this asks too, unless the
+ * check's own answer already said or the reset is known to be used. Never fails the check.
+ */
+async function readReset(f: Listed, target: Endpoint, body: unknown, reading: Record<string, string>, now: number) {
+  let block = obj(body)?.juniper_tide
+  const fiveHour = limitWindows('claude', { observed_at: new Date(now).toISOString(), signals: reading }, now).find((w) => w.id === '5h')
+  const known = limitResets()[f.name]
+  if (block == null && fiveHour?.level === 'exhausted' && !(known?.state === 'used' && (known.nextAvailableAt ?? 0) > now)) {
+    const res = await call(f, target, `${target.url}?at_wall=1&skip_spend=1`)
+    if (!res || typeof res === 'string' || res.status < 200 || res.status > 299) return
+    try {
+      block = obj(JSON.parse(res.body))?.juniper_tide
+    } catch {
+      return
+    }
+  }
+  const status = resetStatus(block, now)
+  if (status) saveReset(f.name, status)
+}
+
+/** Accounts with a reset being used, so a second click can't send a second request. */
+const resetting = new Set<string>()
+
+/**
+ * Uses a Claude account's limit reset: its 5-hour limit is cleared now, once a week. Only ever on
+ * the user's own request, and whether limit checks are on or off. Afterwards the account's limits
+ * are read again, so the meters and the reserve see the result.
+ */
+export async function useLimitReset(name: string): Promise<ResetOutcome> {
+  if (!RESET_ORIGIN) return { ok: false, message: 'Limit resets are turned off while testing.' }
+  if (resetting.has(name)) return { ok: false, message: 'A reset of this account is already under way.' }
+  resetting.add(name)
+  try {
+    const list = await management('/credentials').catch(() => undefined)
+    if (!list?.ok) return { ok: false, message: 'CLIProxyAPI is not running, so the provider could not be asked.' }
+    const f = ((await list.json()) as { files?: Listed[] }).files?.find((f) => f.name === name)
+    if (!f) return { ok: false, message: 'This account no longer exists.' }
+    if (f.provider !== 'claude' || f.account_type !== 'oauth' || !f.auth_index) return { ok: false, message: 'Only Claude subscription accounts have limit resets.' }
+    const organization = await credentialFile(name).then(
+      (file) => file.organization_uuid,
+      () => undefined,
+    )
+    // The provider resets by organization, which CPA notes at sign-in.
+    if (typeof organization !== 'string' || !/^[0-9a-f-]{36}$/i.test(organization)) {
+      return { ok: false, message: "This account's sign-in does not say which organization it belongs to. Sign in again, then try again." }
+    }
+    const url = `${RESET_ORIGIN.url.replace(/\/+$/, '')}/api/organizations/${organization}/reset_rate_limits`
+    const res = await call(f, RESET_ORIGIN, url, { data: JSON.stringify({ program: 'juniper_tide' }), timeoutMs: 30_000 })
+    if (!res) return { ok: false, message: 'CLIProxyAPI is not running, so the provider could not be asked.' }
+    if (typeof res === 'string') return { ok: false, message: `${res}. If the request got through, the limit was reset all the same: check the 5-hour limit before trying again.` }
+    const now = Date.now()
+    const outcome = resetOutcome(res.status, res.body, now)
+    if (outcome.status) saveReset(name, outcome.status)
+    console.log(`Limit reset: ${name}: ${outcome.message}`)
+    // CPA rests an account that ran into its limit until the reset time it was given, which no longer holds.
+    if (outcome.ok) await management('/routing/cooldown/reset', { method: 'POST', body: { auth_index: f.auth_index } }).catch(() => {})
+    if (ENDPOINTS.claude) await check(f, rows().get(name), now).catch(() => {})
+    return outcome
+  } finally {
+    resetting.delete(name)
+  }
 }
 
 /** Checks the account with the oldest reading, if any is due. */
@@ -304,7 +412,13 @@ async function checkNext(now = Date.now()) {
   const checks = rows()
   const held = reserveStatus().accounts
   // Forget credentials that were removed; an empty list is more likely CPA still loading.
-  if (files?.length) for (const name of checks.keys()) if (!files.some((f) => f.name === name)) deleteRow.run(name)
+  if (files?.length) {
+    for (const name of new Set([...checks.keys(), ...Object.keys(limitResets())])) {
+      if (files.some((f) => f.name === name)) continue
+      deleteRow.run(name)
+      forgetReset(name)
+    }
+  }
   let next: { f: Listed; readAt: number } | undefined
   for (const f of files ?? []) {
     // Subscription accounts only: an API key has no usage page. Of the disabled ones, only those the

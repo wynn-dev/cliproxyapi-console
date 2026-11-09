@@ -3,7 +3,7 @@ import { readState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 
 /** Calls CPA's management API as the console. Undefined when CPA is not running or the key is stale. */
-export async function management(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) {
+export async function management(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; timeoutMs?: number } = {}) {
   const key = readState().managementKey
   // Never send a stale key: CPA bans 127.0.0.1 (i.e. the console) after five failures.
   if (supervisor.state !== 'running' || !supervisor.port || !keyMatchesConfig(key)) return
@@ -11,7 +11,7 @@ export async function management(path: string, init: { method?: string; body?: u
     method: init.method,
     headers: { Authorization: `Bearer ${key}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
     body: init.body ? JSON.stringify(init.body) : undefined,
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(init.timeoutMs ?? 10_000),
   })
 }
 

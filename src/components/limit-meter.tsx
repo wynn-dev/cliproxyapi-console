@@ -2,7 +2,7 @@ import { Countdown } from '@/components/credentials/status'
 import { holdLabel, reserveHold } from '@/components/credentials/lib'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtWhen } from '@/lib/format'
-import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow, type PoolWeekly } from '@/lib/limits'
+import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow, type PoolLimit } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -15,7 +15,10 @@ function fmtUntil(ms: number) {
   return h ? `${h}h ${m % 60}m` : `${m}m`
 }
 
-/** Limits every model shares. A limit check only reports these, so the others come from an older reading. */
+/**
+ * Limits every model shares. A reading can lack the others (a limit check has Fable only when the
+ * provider's answer lists it), which then come from an older reading.
+ */
 const SHARED_WINDOWS = new Set(['5h', '7d', ':primary', ':secondary'])
 
 /** An account's limit meters, captioned with the reserve hold when there is one. */
@@ -182,19 +185,22 @@ function LimitMeter({
   )
 }
 
-/** A provider's weekly limits added up over its accounts, as one meter. */
-export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; reserve?: number; now: number }) {
+/** One of a provider's limits (weekly, or Claude's Fable) added up over its accounts, as one meter. */
+export function PoolMeter({ pool: p, reserve, now }: { pool: PoolLimit; reserve?: number; now: number }) {
   const share = p.left / p.accounts
   const pct = Math.round(share * 100)
   const tone = METER_TONE[share <= 0 ? 'exhausted' : share <= 0.2 ? 'warning' : 'ok']
-  const name = providerLabel(p.provider)
+  const weekly = p.label === 'Weekly'
+  // The weekly meter goes by its provider; any other by its limit, as on the accounts' own meters.
+  const name = weekly ? providerLabel(p.provider) : p.label
+  const limit = weekly ? 'weekly' : p.label
   const gain = p.nextReset && Math.round((p.nextReset.gain / p.accounts) * 100)
   const reset = p.nextReset && `next reset in ${fmtUntil(p.nextReset.at - now)}${gain ? `, +${gain}%` : ''}`
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${name} weekly limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${providerLabel(p.provider)} ${limit} limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="truncate text-muted-foreground">
               <span className="font-medium text-foreground">{name}</span> · {p.accounts} accounts
@@ -216,10 +222,10 @@ export function PoolWeeklyMeter({ pool: p, reserve, now }: { pool: PoolWeekly; r
       </TooltipTrigger>
       <TooltipContent className="max-w-72">
         <div className="font-medium">
-          {name} weekly, all accounts: {pct}% left
+          {providerLabel(p.provider)} {limit}, all accounts: {pct}% left
         </div>
         <div>
-          {+p.left.toFixed(1)} of {p.accounts} accounts' weekly limits left
+          {+p.left.toFixed(1)} of {p.accounts} accounts' {limit} limits left
         </div>
         {p.nextReset && (
           <div>

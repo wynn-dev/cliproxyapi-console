@@ -65,19 +65,25 @@ export function excludedModels(file: Record<string, unknown>) {
 
 const BILLING = new Set(['allowed', 'allowed_warning'])
 
-/** Extra usage is on and the reading came from a served request (Retry-After comes with a rejected one). */
+/**
+ * Extra usage is on and the reading came from a served request (Retry-After comes with a rejected
+ * one). Undefined for a reading that doesn't say: a limit check's has the windows only.
+ */
 function overageAllowed(reading: LimitReading | undefined) {
   const s = Object.fromEntries(Object.entries(reading?.signals ?? {}).map(([k, v]) => [k.toLowerCase(), v.trim().toLowerCase()]))
-  return BILLING.has(s['anthropic-ratelimit-unified-overage-status']) && !s['retry-after']
+  const status = s['anthropic-ratelimit-unified-overage-status']
+  return status === undefined ? undefined : BILLING.has(status) && !s['retry-after']
 }
 
-/** Whether the account's Fable models should be held, and until when. */
-function trip(reading: LimitReading | undefined, now: number) {
+/** Whether the account's Fable models should be held, and until when. `held` is its hold so far. */
+function trip(reading: LimitReading | undefined, now: number, held?: Hold) {
   const w = limitWindows('claude', reading, now).find((w) => w.label === LABEL)
-  // Without a reset time the models could never be released.
-  if (!w || w.resetsAt === undefined) return { seen: !!w }
+  // Without a reset time the models could never be released, and a window that says nothing was
+  // used can't be told from one that has yet to start: only one that has reset counts as seen.
+  if (!w || w.resetsAt === undefined) return { seen: !!w?.reset }
   const pct = reserveLimits().fable
-  const billing = holdsExtraUsage() && w.level === 'exhausted' && overageAllowed(reading)
+  // A reading that doesn't say whether extra usage is on leaves that as the hold has it.
+  const billing = holdsExtraUsage() && w.level === 'exhausted' && (overageAllowed(reading) ?? !!held?.billing)
   const short = (pct > 0 && w.left <= pct / 100 + 1e-9) || billing
   return { seen: true, short: short ? { until: w.resetsAt, billing: billing && !(pct > 0 && w.left <= pct / 100 + 1e-9) } : undefined }
 }
@@ -93,7 +99,7 @@ export async function applyFable(files: ListedCredential[], readings: Record<str
     tracked.delete(f.name)
     if (f.provider !== 'claude') continue
     try {
-      await applyOne(f.name, held, trip(readings[f.name], now), now)
+      await applyOne(f.name, held, trip(readings[f.name], now, held), now)
       failing.delete(f.name)
     } catch (err) {
       if (!failing.has(f.name)) console.error(`Fable reserve: ${(err as Error).message}`)

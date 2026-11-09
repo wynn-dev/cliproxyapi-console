@@ -34,6 +34,8 @@ async function serve(handler: (req: { method: string; url: URL; headers: http.In
 // at the 5-hour limit), what using a reset answers, and every request it got.
 const provider = {
   usage: {} as unknown,
+  /** The status of a plain usage read, to have it fail. */
+  usageStatus: 200,
   atWall: {} as unknown,
   reset: { status: 200, json: {} as unknown },
   requests: [] as { method: string; path: string; query: string; headers: http.IncomingHttpHeaders; body: string }[],
@@ -41,7 +43,7 @@ const provider = {
 const providerUrl = await serve(({ method, url, headers, body }) => {
   provider.requests.push({ method, path: url.pathname, query: url.search, headers, body })
   if (method === 'POST') return provider.reset
-  return { json: url.searchParams.has('at_wall') ? provider.atWall : provider.usage }
+  return url.searchParams.has('at_wall') ? { json: provider.atWall } : { status: provider.usageStatus, json: provider.usage }
 })
 
 // CPA's management API, as much of it as limit checks and the Fable reserve use.
@@ -56,6 +58,10 @@ const cpaUrl = await serve(async ({ method, url, body }) => {
   const sent = body ? JSON.parse(body) : {}
   if (route === 'GET /credentials') return { json: { files: cpa.files } }
   if (route === 'GET /credentials/download') return { json: cpa.disk[url.searchParams.get('name') ?? ''] ?? {} }
+  if (route === 'PATCH /credentials/status') {
+    Object.assign(cpa.files.find((f) => f.name === sent.name) ?? {}, { disabled: sent.disabled })
+    return { json: { status: 'ok' } }
+  }
   if (route === 'PATCH /credentials/fields') {
     const { name, ...fields } = sent
     cpa.disk[name] = Object.fromEntries(Object.entries({ ...cpa.disk[name], ...fields }).filter(([, v]) => v !== null))
@@ -88,7 +94,8 @@ mock.method(console, 'error', () => {})
 mock.method(console, 'log', () => {})
 const { claudeSignals, limitCheckStatus, useLimitReset } = await import('../server/limit-checks.ts')
 const { resetStatus } = await import('../server/limit-resets.ts')
-const { limitReadings } = await import('../server/limits.ts')
+const { limitReadings, saveReading } = await import('../server/limits.ts')
+const { applyReserve, reserveStatus } = await import('../server/reserve.ts')
 const { applyFable, fableStatus } = await import('../server/fable.ts')
 const { updateState } = await import('../server/state.ts')
 const { supervisor } = await import('../server/supervisor.ts')
@@ -244,7 +251,7 @@ describe('resetStatus', () => {
 describe('using a limit reset', () => {
   const NAME = 'claude-ada.json'
   beforeEach(() => {
-    db.exec('DELETE FROM limit_resets; DELETE FROM limit_checks; DELETE FROM limits')
+    db.exec('DELETE FROM limit_resets; DELETE FROM limit_checks; DELETE FROM limits; DELETE FROM reserve')
     cpa.files = [
       { name: NAME, provider: 'claude', account_type: 'oauth', auth_index: 'a1' },
       { name: 'codex-ada.json', provider: 'codex', account_type: 'oauth', auth_index: 'c1' },
@@ -253,6 +260,7 @@ describe('using a limit reset', () => {
     cpa.cooldownResets = []
     provider.requests = []
     provider.usage = usage(Date.now(), 100, 60, 30)
+    provider.usageStatus = 200
     provider.atWall = {}
     provider.reset = { status: 200, json: {} }
   })
@@ -282,6 +290,79 @@ describe('using a limit reset', () => {
     assert.equal(signals['Anthropic-Ratelimit-Unified-7d_oi-Utilization'], '0.3')
     assert.ok(Number(signals['Anthropic-Ratelimit-Unified-7d_oi-Reset']) > Date.now() / 1000)
     assert.deepEqual(cpa.cooldownResets, [{ auth_index: 'a1' }])
+  })
+
+  /** The account as the reserve holds it at its 5-hour limit, from a reading with these other signals. */
+  async function held(weekly = 0.6, more: Record<string, string> = {}) {
+    const now = Date.now()
+    saveReading(NAME, now - 60_000, {
+      [`${P}5h-utilization`]: '1',
+      [`${P}5h-reset`]: seconds(now + 2 * H),
+      [`${P}7d-utilization`]: String(weekly),
+      [`${P}7d-reset`]: seconds(now + 3 * D),
+      ...more,
+    })
+    await applyReserve(cpa.files as never, limitReadings(), now)
+    assert.equal(cpa.files[0].disabled, true)
+    provider.reset = { status: 200, json: { result: 'reset', next_available_at: iso(now + 6 * D) } }
+  }
+  /** What the reserve makes of the account on its next round. */
+  async function afterNextRound() {
+    await applyReserve(cpa.files as never, limitReadings(), Date.now())
+    return { disabled: cpa.files[0].disabled, hold: reserveStatus().accounts[NAME] }
+  }
+
+  test('a reset ends a hold for the 5-hour limit, whatever is read afterwards', async () => {
+    const now = Date.now()
+    // After a reset no 5-hour window is running: the provider leaves it out, or reports it unused
+    // with no reset time, or the read fails and the last reading still has the old window.
+    const after: (() => void)[] = [
+      () => (provider.usage = { ...usage(now, 0, 60, 30), five_hour: null }),
+      () => (provider.usage = { ...usage(now, 0, 60, 30), five_hour: { utilization: 0, resets_at: null } }),
+      () => (provider.usageStatus = 500),
+    ]
+    for (const answer of after) {
+      await held()
+      assert.deepEqual(reserveStatus().accounts[NAME].windows, ['5h'])
+      answer()
+      assert.equal((await useLimitReset(NAME)).ok, true)
+      assert.equal(cpa.files[0].disabled, false)
+      assert.equal(reserveStatus().accounts[NAME], undefined)
+      // The other windows are still known, the old 5-hour one is not, so nothing holds it again.
+      const { signals } = limitReadings()[NAME]
+      assert.equal(signals['Anthropic-Ratelimit-Unified-7d-Utilization'] ?? signals[`${P}7d-utilization`], '0.6')
+      assert.ok(Object.keys(signals).every((k) => !/-5h-reset$/i.test(k)))
+      assert.deepEqual(await afterNextRound(), { disabled: false, hold: undefined })
+      provider.usageStatus = 200
+      db.exec('DELETE FROM limit_checks; DELETE FROM limits')
+    }
+  })
+
+  test('a reset leaves a hold for another limit in place', async () => {
+    await held(0.97)
+    assert.deepEqual(reserveStatus().accounts[NAME].windows, ['5h', 'weekly'])
+    provider.usage = { ...usage(Date.now(), 0, 97, 30), five_hour: null }
+    assert.equal((await useLimitReset(NAME)).ok, true)
+    assert.equal(cpa.files[0].disabled, true)
+    assert.deepEqual(reserveStatus().accounts[NAME].windows, ['weekly'])
+    assert.deepEqual((await afterNextRound()).hold?.windows, ['weekly'])
+  })
+
+  test('a reset ends a hold for paid extra usage past the 5-hour limit', async () => {
+    await held(0.6, { [`${P}status`]: 'rejected', [`${P}5h-status`]: 'rejected', [`${P}overage-status`]: 'allowed' })
+    assert.equal(reserveStatus().accounts[NAME].reason, 'extra-usage')
+    provider.usageStatus = 500
+    assert.equal((await useLimitReset(NAME)).ok, true)
+    assert.equal(cpa.files[0].disabled, false)
+    assert.deepEqual(await afterNextRound(), { disabled: false, hold: undefined })
+  })
+
+  test('an answer other than a reset leaves the hold alone', async () => {
+    await held()
+    provider.reset = { status: 200, json: { result: 'already_used', next_available_at: iso(Date.now() + 2 * D) } }
+    assert.equal((await useLimitReset(NAME)).ok, false)
+    assert.equal(cpa.files[0].disabled, true)
+    assert.deepEqual((await afterNextRound()).hold?.windows, ['5h'])
   })
 
   test("says so when this week's reset is already used", async () => {

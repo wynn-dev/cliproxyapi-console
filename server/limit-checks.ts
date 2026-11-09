@@ -6,7 +6,7 @@ import { forgetReset, limitResets, resetOutcome, resetStatus, saveReset, type Re
 import { limitWindows } from './limit-windows.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
 import { credentialFile, management } from './management.ts'
-import { reserveStatus } from './reserve.ts'
+import { releaseFiveHour, reserveStatus } from './reserve.ts'
 import { readState, updateState } from './state.ts'
 import { db } from './usage.ts'
 
@@ -366,7 +366,7 @@ const resetting = new Set<string>()
 /**
  * Uses a Claude account's limit reset: its 5-hour limit is cleared now, once a week. Only ever on
  * the user's own request, and whether limit checks are on or off. Afterwards the account's limits
- * are read again, so the meters and the reserve see the result.
+ * are read again for the meters, and a hold that waited for the 5-hour limit ends.
  */
 export async function useLimitReset(name: string): Promise<ResetOutcome> {
   if (!RESET_ORIGIN) return { ok: false, message: 'Limit resets are turned off while testing.' }
@@ -397,6 +397,16 @@ export async function useLimitReset(name: string): Promise<ResetOutcome> {
     // CPA rests an account that ran into its limit until the reset time it was given, which no longer holds.
     if (outcome.ok) await management('/routing/cooldown/reset', { method: 'POST', body: { auth_index: f.auth_index } }).catch(() => {})
     if (ENDPOINTS.claude) await check(f, rows().get(name), now).catch(() => {})
+    if (outcome.ok) {
+      // The provider said it reset the limit, so the old 5-hour window no longer counts, whatever was
+      // read since. If the read just now failed, the last reading still has that window and would
+      // hold the account again: keep only its weekly windows.
+      const last = limitReadings()[name]
+      if (last && Date.parse(last.observed_at) < now) {
+        saveReading(name, now, Object.fromEntries(Object.entries(last.signals).filter(([k]) => /^anthropic-ratelimit-unified-7d(_oi)?-(utilization|reset)$/i.test(k))))
+      }
+      await releaseFiveHour(f, now).catch((err: Error) => console.error(`Limit reset: ${err.message}`))
+    }
     return outcome
   } finally {
     resetting.delete(name)

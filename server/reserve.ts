@@ -141,6 +141,22 @@ export async function setDisabled(name: string, disabled: boolean, why = '', who
   console.log(`${who}: ${disabled ? 'disabled' : 'enabled'} ${name}${why}`)
 }
 
+/**
+ * The provider reset an account's 5-hour limit on request (limit-checks.ts), so a hold no longer
+ * waits for that window: the account is enabled again unless another limit holds it too. Not for
+ * the caller to decide from a reading, which may show no 5-hour window at all after a reset.
+ */
+export async function releaseFiveHour(f: ListedCredential, now = Date.now()) {
+  const row = rows().get(f.name)
+  if (!row || row.reason === 'signed-out' || !row.windows.includes('5h')) return
+  const windows = row.windows.filter((w) => w !== '5h')
+  // Ended now when nothing else holds it. Saved first, so the next tick finishes what fails here.
+  saveRow({ ...row, windows, until: windows.length ? row.until : now })
+  if (windows.length) return
+  if (f.disabled && !row.overridden) await setDisabled(f.name, false, ': its 5-hour limit was reset')
+  removeRow(f.name)
+}
+
 /** Accounts whose last update failed, so a failure that repeats every tick is logged once. */
 const failing = new Set<string>()
 

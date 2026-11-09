@@ -9,9 +9,10 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
   SQLite, so you get history by model, credential, client key and provider, with tokens, latency, failures, requests
   turned away before reaching an account, and what the traffic would have cost at API prices.
 - **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how much of each is left
-  and when it resets. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
+  and when it resets, plus each provider's weekly limit and Claude's Fable limit added up across accounts. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
   so people who use the account directly keep some room. Accounts that start billing paid extra usage are held too, and
-  signed-out accounts are taken out of rotation until you sign them in again.
+  signed-out accounts are taken out of rotation until you sign them in again. A Claude account's panel says whether its
+  once-a-week reset of the 5-hour limit is left, and lets you use it.
 - **Smart account order**: with fill first, among accounts of the same priority, the one whose weekly limit resets soonest is used first, and
   accounts close to their reserve stop taking new conversations while ongoing ones keep their prompt cache.
 - **Wrapped**: each month, or all time, as slides to post (tokens, value at API prices, top models, your daily rhythm,

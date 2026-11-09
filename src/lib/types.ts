@@ -267,6 +267,19 @@ export interface LimitChecks {
   enabled: boolean
   /** Each account's last check, by credential file name. */
   accounts: Record<string, LimitCheck>
+  /** What the provider last said about each Claude account's limit reset, by credential file name. */
+  resets: Record<string, LimitReset>
+}
+
+/** A Claude account's limit reset: it clears the 5-hour limit, once a week. */
+export interface LimitReset {
+  /** When the provider said so (ms). */
+  readAt: number
+  /** `used`: this week's reset is spent. `not-offered`: the provider gives this account none. */
+  state: 'available' | 'used' | 'not-offered'
+  /** When a used reset is available again (ms), if the provider said. */
+  nextAvailableAt?: number
+  reason?: string
 }
 
 export interface LimitCheck {

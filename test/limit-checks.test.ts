@@ -105,7 +105,7 @@ const { applyFable, fableStatus } = await import('../server/fable.ts')
 const { updateState } = await import('../server/state.ts')
 const { supervisor } = await import('../server/supervisor.ts')
 const { db } = await import('../server/usage.ts')
-const { poolLimits } = await import('../src/lib/limits.ts')
+const { limitWindows, poolLimits } = await import('../src/lib/limits.ts')
 
 supervisor.state = 'running'
 supervisor.port = Number(new URL(cpaUrl).port)
@@ -566,11 +566,13 @@ describe('using a Fable reset', () => {
       answer()
       assert.equal((await useLimitReset(NAME, 'fable')).ok, true)
       assert.equal(await held(), false)
-      // The other windows are still known, and the used-up Fable window is not.
+      // The other windows are still known, and the Fable window is an unused one: without it the
+      // account's panel would show the used-up one of an older reading.
       const signals = Object.fromEntries(Object.entries(limitReadings()[NAME].signals).map(([k, v]) => [k.toLowerCase(), v]))
       assert.ok(signals[`${P}7d-utilization`])
-      assert.notEqual(signals[`${P}7d_oi-utilization`], '1')
+      assert.equal(Number(signals[`${P}7d_oi-utilization`] ?? NaN), 0)
       assert.equal(signals[`${P}7d_oi-reset`], undefined)
+      assert.equal(limitWindows('claude', limitReadings()[NAME], Date.now()).find((w) => w.id === '7d_oi')?.level, 'ok')
     }
   })
 

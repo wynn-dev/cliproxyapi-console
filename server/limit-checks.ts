@@ -407,6 +407,8 @@ const KEPT_WINDOWS: Record<ResetKind, RegExp> = {
   '5h': /^anthropic-ratelimit-unified-7d(_oi)?-(utilization|reset)$/i,
   fable: /^anthropic-ratelimit-unified-(5h|7d)-(utilization|reset)$/i,
 }
+/** How much of the Fable limit is used, as a reading names it. */
+const FABLE_UTILIZATION = 'anthropic-ratelimit-unified-7d_oi-utilization'
 
 /**
  * Uses a Claude account's limit reset: its 5-hour limit is cleared now, once a week. Only ever on
@@ -465,13 +467,14 @@ export async function useLimitReset(name: string, kind: ResetKind = '5h'): Promi
       // The provider said it reset the limit, so the old 5-hour window no longer counts, whatever was
       // read since. If the read just now failed, the last reading still has that window and would
       // hold the account again: keep only its weekly windows. The same for the Fable window, which
-      // is written as unused: without one, the account's panel shows the one from the reading before.
+      // is written as unused, also into a reading from just now that lists no Fable limit: without
+      // one, the account's panel shows the one from the reading before, still used up.
       const last = limitReadings()[name]
-      if (last && Date.parse(last.observed_at) < now) {
-        const kept = Object.entries(last.signals).filter(([k]) => KEPT_WINDOWS[kind].test(k))
-        if (kind === 'fable') kept.push(...Object.entries(canonical({ 'anthropic-ratelimit-unified-7d_oi-utilization': '0' })))
-        saveReading(name, now, Object.fromEntries(kept))
-      }
+      const at = Date.parse(last?.observed_at ?? '')
+      const kept = Object.entries(last?.signals ?? {}).filter(([k]) => at === now || KEPT_WINDOWS[kind].test(k))
+      const unused = kind === 'fable' && !kept.some(([k]) => k.toLowerCase() === FABLE_UTILIZATION)
+      if (unused) kept.push(...Object.entries(canonical({ [FABLE_UTILIZATION]: '0' })))
+      if (at < now || (at === now && unused)) saveReading(name, now, Object.fromEntries(kept), true)
       await (kind === 'fable' ? releaseFable(name, now) : releaseFiveHour(f, now)).catch((err: Error) => console.error(`Limit reset: ${err.message}`))
     }
     return outcome

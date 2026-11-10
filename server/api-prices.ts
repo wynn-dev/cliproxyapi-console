@@ -49,6 +49,8 @@ const FAST = { ...FLEX, fast: 2, priority: 2 }
 const ULTRAFAST = { ...FAST, ultrafast: 6 }
 
 export const MODEL_PRICES: ModelPrice[] = [
+  // Read from the pricing page on 2026-11-10; the rest of the list was not checked again then.
+  { models: ['claude-fable-5.2', 'claude-mythos-5.2'], label: 'Claude Fable and Mythos 5.2', provider: 'anthropic', input: 8, output: 40, cacheRead: 0.025 },
   { models: ['claude-fable-5.1', 'claude-mythos-5.1'], label: 'Claude Fable and Mythos 5.1', provider: 'anthropic', input: 10, output: 50, cacheRead: 0.025 },
   { models: ['claude-fable-5', 'claude-5-fable', 'claude-mythos-5'], label: 'Claude Fable and Mythos 5', provider: 'anthropic', input: 10, output: 50 },
   { models: ['claude-opus-5.5'], label: 'Claude Opus 5.5', provider: 'anthropic', input: 4, output: 20, cacheRead: 0.05 },

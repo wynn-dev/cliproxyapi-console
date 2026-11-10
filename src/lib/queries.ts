@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { consoleApi, mgmt } from './api'
 import { fmtWhen } from './format'
 import type { LimitReading } from './limits'
-import type { ApiKeyGroup, ConsoleStatus, CredentialsList, LimitChecks, OrderStatus, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
+import type { ApiKeyGroup, ConsoleStatus, CredentialsList, LimitChecks, LimitResetKind, OrderStatus, ReleaseInfo, ReserveStatus, UsageFacets, UsageSummary, V8Config } from './types'
 
 export const queries = {
   status: () =>
@@ -119,19 +119,23 @@ export function useLimitChecksWrite() {
 }
 
 /**
- * Uses a Claude account's limit reset, and says how it went. The account's limits were read again
- * by the time it answers.
+ * Uses a Claude account's limit reset, or one of its Fable resets, and says how it went. The
+ * account's limits were read again by the time it answers.
  */
 export function useLimitReset() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (name: string) => consoleApi<{ ok: boolean; message: string; checks: LimitChecks }>('/limit-resets', { method: 'POST', body: { name } }),
-    onSuccess: ({ ok, message, checks }, name) => {
+    mutationFn: (body: { name: string; kind: LimitResetKind }) =>
+      consoleApi<{ ok: boolean; message: string; checks: LimitChecks }>('/limit-resets', { method: 'POST', body }),
+    onSuccess: ({ ok, message, checks }, { name, kind }) => {
       qc.setQueryData(queries.limitChecks().queryKey, checks)
       void qc.invalidateQueries({ queryKey: queries.limits().queryKey })
+      void qc.invalidateQueries({ queryKey: queries.reserve().queryKey })
       void qc.invalidateQueries({ queryKey: ['mgmt', 'credentials'] })
       const next = checks.resets[name]?.state === 'used' ? checks.resets[name].nextAvailableAt : undefined
-      const description = next ? `A reset is available again ${fmtWhen(next)}.` : undefined
+      const left = checks.fableResets[name]?.state === 'available' ? checks.fableResets[name].left : undefined
+      const description =
+        kind === 'fable' ? (left ? `${left} Fable reset${left === 1 ? '' : 's'} left.` : undefined) : next ? `A reset is available again ${fmtWhen(next)}.` : undefined
       if (ok) toast.success(message, { description })
       else toast.error(message, { description })
     },

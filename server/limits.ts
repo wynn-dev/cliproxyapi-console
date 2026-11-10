@@ -33,14 +33,19 @@ export interface ListedCredential {
   quota?: { observed_at?: string; signals?: Record<string, string> }
 }
 
-const upsert = db.prepare(`
+const UPSERT = `
   INSERT INTO limits (name, observed_at, signals) VALUES (?, ?, ?)
   ON CONFLICT (name) DO UPDATE SET observed_at = excluded.observed_at, signals = excluded.signals
-  WHERE excluded.observed_at > limits.observed_at`)
+  WHERE excluded.observed_at`
+const upsert = db.prepare(`${UPSERT} > limits.observed_at`)
+const amend = db.prepare(`${UPSERT} >= limits.observed_at`)
 
-/** Stores a reading unless a newer one is already stored. Also used by the idle-account limit checks. */
-export function saveReading(name: string, observedAt: number, signals: Record<string, string>) {
-  upsert.run(name, observedAt, JSON.stringify(signals))
+/**
+ * Stores a reading unless a newer one is already stored. Also used by the idle-account limit checks.
+ * With `amended` it replaces a reading of the same time too: the one it corrects.
+ */
+export function saveReading(name: string, observedAt: number, signals: Record<string, string>, amended = false) {
+  ;(amended ? amend : upsert).run(name, observedAt, JSON.stringify(signals))
 }
 
 async function record() {

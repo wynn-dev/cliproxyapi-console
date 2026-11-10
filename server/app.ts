@@ -240,11 +240,12 @@ app.put('/console/api/limit-checks', async (c) => {
   return c.json(limitCheckStatus())
 })
 
-// Uses a Claude account's weekly limit reset. Only on the user's own click; nothing else calls it.
+// Uses a Claude account's weekly limit reset, or one of its Fable resets. Only on the user's own click; nothing else calls it.
 app.post('/console/api/limit-resets', async (c) => {
-  const body: { name?: unknown } = await c.req.json().catch(() => ({}))
+  const body: { name?: unknown; kind?: unknown } = await c.req.json().catch(() => ({}))
   if (typeof body.name !== 'string' || !body.name) return c.json({ error: 'name is required' }, 400)
-  const { ok, message } = await useLimitReset(body.name)
+  if (body.kind !== undefined && body.kind !== '5h' && body.kind !== 'fable') return c.json({ error: 'kind must be 5h or fable' }, 400)
+  const { ok, message } = await useLimitReset(body.name, body.kind)
   return c.json({ ok, message, checks: limitCheckStatus() })
 })
 

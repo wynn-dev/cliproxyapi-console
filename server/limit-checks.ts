@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import YAML from 'yaml'
 import { paths } from './env.ts'
+import { releaseFable } from './fable.ts'
 import { recordLimitReading } from './limit-history.ts'
-import { forgetReset, limitResets, resetOutcome, resetStatus, saveReset, type ResetOutcome } from './limit-resets.ts'
+import { fableResetStatus, forgetReset, limitResets, resetOutcome, resetStatus, saveReset, type ResetKind, type ResetOutcome } from './limit-resets.ts'
 import { limitWindows } from './limit-windows.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
 import { credentialFile, management } from './management.ts'
@@ -27,6 +29,10 @@ const TICK_MS = 30_000
 const MAX_BACKOFF_MS = 6 * 3600_000
 /** Failed checks wait 20m, 40m, 80m… before the next try. */
 const backoff = (failures: number) => Math.min(MAX_BACKOFF_MS, STALE_MS * 2 ** failures)
+/** What an account said about its Fable reset is asked again after this long, as Claude Code does. */
+const FABLE_RESET_STALE_MS = 3 * 86_400_000
+/** How long a Fable reset without a final answer is tried again as the same request. */
+const UNSETTLED_MS = 10 * 60_000
 
 /**
  * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point one provider's
@@ -126,12 +132,14 @@ export function setLimitChecks(enabled: boolean) {
 /**
  * Each account's last check, by credential file name. `error` and `status` describe the last check
  * when it failed (a 401 or 403 usually means the account's sign-in no longer works). `resets` is
- * what the provider last said about each Claude account's limit reset.
+ * what the provider last said about each Claude account's limit reset, `fableResets` about its
+ * Fable reset.
  */
 export function limitCheckStatus() {
   return {
     enabled: limitChecksEnabled(),
     resets: limitResets(),
+    fableResets: limitResets('fable'),
     accounts: Object.fromEntries(
       [...rows().values()].map((r) => [
         r.name,
@@ -335,40 +343,83 @@ async function check(f: Listed, prev: Row | undefined, now: number) {
   recordLimitReading(f.name, provider, { observed_at: new Date(now).toISOString(), signals: reading })
   saveRow.run(f.name, now, now, 0, 0, '')
   if (prev?.failures) console.log(`Limit check: ${f.name} works again`)
-  if (provider === 'claude') await readReset(f, target, body, reading, now)
+  if (provider === 'claude') await readResets(f, target, body, reading, now)
+}
+
+/** The usage answer to one of the questions Claude Code asks with it (`at_wall=1`…), if it gave one. */
+async function ask(f: Listed, target: Endpoint, question: string) {
+  const res = await call(f, target, `${target.url}?${question}&skip_spend=1`)
+  if (!res || typeof res === 'string' || res.status < 200 || res.status > 299) return undefined
+  try {
+    const answer = obj(JSON.parse(res.body))
+    // An answer without a single field is an error in disguise, as Claude Code takes it.
+    return answer && Object.keys(answer).length ? answer : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Asks whether the account has a Fable reset left, as Claude Code's /limit-reset does, and notes the answer if it got one. */
+async function readFableReset(f: Listed, target: Endpoint, now: number) {
+  const answer = await ask(f, target, 'cedar_ember=1')
+  const status = answer && fableResetStatus(answer.cedar_ember, now)
+  if (status) saveReset(f.name, status, 'fable')
+  return status
 }
 
 /**
  * Notes whether the account's limit reset is available. The provider says so when asked the way
  * Claude Code asks once the 5-hour limit is reached, so that is when this asks too, unless the
- * check's own answer already said or the reset is known to be used. Never fails the check.
+ * check's own answer already said or the reset is known to be used. The Fable reset is told at any
+ * time, so it is asked about when the last answer is days old. Never fails the check.
  */
-async function readReset(f: Listed, target: Endpoint, body: unknown, reading: Record<string, string>, now: number) {
+async function readResets(f: Listed, target: Endpoint, body: unknown, reading: Record<string, string>, now: number) {
   let block = obj(body)?.juniper_tide
   const fiveHour = limitWindows('claude', { observed_at: new Date(now).toISOString(), signals: reading }, now).find((w) => w.id === '5h')
   const known = limitResets()[f.name]
   if (block == null && fiveHour?.level === 'exhausted' && !(known?.state === 'used' && (known.nextAvailableAt ?? 0) > now)) {
-    const res = await call(f, target, `${target.url}?at_wall=1&skip_spend=1`)
-    if (!res || typeof res === 'string' || res.status < 200 || res.status > 299) return
-    try {
-      block = obj(JSON.parse(res.body))?.juniper_tide
-    } catch {
-      return
-    }
+    block = (await ask(f, target, 'at_wall=1'))?.juniper_tide
   }
   const status = resetStatus(block, now)
   if (status) saveReset(f.name, status)
+  if (now - (limitResets('fable')[f.name]?.readAt ?? 0) >= FABLE_RESET_STALE_MS) await readFableReset(f, target, now)
+}
+
+/** Why no Fable reset is used, by what the provider just said about the account's. */
+const NO_FABLE_RESET = {
+  unknown: 'The provider did not say whether this account has a Fable reset left.',
+  available: "The provider says this account's Fable reset can't be used right now.",
+  used: 'This account has no Fable reset left.',
+  'not-offered': 'The provider offers this account no Fable reset.',
 }
 
 /** Accounts with a reset being used, so a second click can't send a second request. */
 const resetting = new Set<string>()
+/**
+ * Fable resets asked for without a final answer, by account: the grant and the request's id. Such a
+ * reset may have gone through all the same, so a second try repeats the same request, which the
+ * provider can tell from a new one. As Claude Code does.
+ */
+const unsettled = new Map<string, { grantId: string; requestId: string; at: number }>()
+
+/** The windows a reading keeps once a reset cleared the other one, when the limits could not be read again. */
+const KEPT_WINDOWS: Record<ResetKind, RegExp> = {
+  '5h': /^anthropic-ratelimit-unified-7d(_oi)?-(utilization|reset)$/i,
+  fable: /^anthropic-ratelimit-unified-(5h|7d)-(utilization|reset)$/i,
+}
+/** How much of the Fable limit is used, as a reading names it. */
+const FABLE_UTILIZATION = 'anthropic-ratelimit-unified-7d_oi-utilization'
 
 /**
  * Uses a Claude account's limit reset: its 5-hour limit is cleared now, once a week. Only ever on
  * the user's own request, and whether limit checks are on or off. Afterwards the account's limits
  * are read again for the meters, and a hold that waited for the 5-hour limit ends.
+ *
+ * With `fable` it uses one of the account's Fable resets instead: the Fable limit is cleared and
+ * the hold on its Fable models ends. The provider is first asked which reset can be used now, as
+ * Claude Code asks before it uses one.
  */
-export async function useLimitReset(name: string): Promise<ResetOutcome> {
+export async function useLimitReset(name: string, kind: ResetKind = '5h'): Promise<ResetOutcome> {
   if (!RESET_ORIGIN) return { ok: false, message: 'Limit resets are turned off while testing.' }
   if (resetting.has(name)) return { ok: false, message: 'A reset of this account is already under way.' }
   resetting.add(name)
@@ -386,13 +437,28 @@ export async function useLimitReset(name: string): Promise<ResetOutcome> {
     if (typeof organization !== 'string' || !/^[0-9a-f-]{36}$/i.test(organization)) {
       return { ok: false, message: "This account's sign-in does not say which organization it belongs to. Sign in again, then try again." }
     }
+    let before: ReturnType<typeof fableResetStatus>
+    let request: { grantId: string; requestId: string; at: number } | undefined
+    let retried = false
+    if (kind === 'fable') {
+      if (!ENDPOINTS.claude) return { ok: false, message: 'Claude accounts are not read while testing, so the provider could not be asked which Fable reset to use.' }
+      before = await readFableReset(f, ENDPOINTS.claude, Date.now())
+      if (!before?.grantId) return { ok: false, message: `${NO_FABLE_RESET[before?.state ?? 'unknown']} Nothing was used.` }
+      const last = unsettled.get(name)
+      request = last?.grantId === before.grantId && Date.now() - last.at < UNSETTLED_MS ? last : { grantId: before.grantId, requestId: randomUUID(), at: Date.now() }
+      retried = request === last
+      unsettled.set(name, request)
+    }
+    const data = request ? { program: 'cedar_ember', grant_id: request.grantId, request_id: request.requestId } : { program: 'juniper_tide' }
+    const limit = kind === 'fable' ? 'Fable limit' : '5-hour limit'
     const url = `${RESET_ORIGIN.url.replace(/\/+$/, '')}/api/organizations/${organization}/reset_rate_limits`
-    const res = await call(f, RESET_ORIGIN, url, { data: JSON.stringify({ program: 'juniper_tide' }), timeoutMs: 30_000 })
+    const res = await call(f, RESET_ORIGIN, url, { data: JSON.stringify(data), timeoutMs: 30_000 })
     if (!res) return { ok: false, message: 'CLIProxyAPI is not running, so the provider could not be asked.' }
-    if (typeof res === 'string') return { ok: false, message: `${res}. If the request got through, the limit was reset all the same: check the 5-hour limit before trying again.` }
+    if (typeof res === 'string') return { ok: false, message: `${res}. If the request got through, the limit was reset all the same: check the ${limit} before trying again.` }
     const now = Date.now()
-    const outcome = resetOutcome(res.status, res.body, now)
-    if (outcome.status) saveReset(name, outcome.status)
+    const outcome = resetOutcome(res.status, res.body, now, kind, before, retried)
+    if (outcome.settled) unsettled.delete(name)
+    if (outcome.status) saveReset(name, outcome.status, kind)
     console.log(`Limit reset: ${name}: ${outcome.message}`)
     // CPA rests an account that ran into its limit until the reset time it was given, which no longer holds.
     if (outcome.ok) await management('/routing/cooldown/reset', { method: 'POST', body: { auth_index: f.auth_index } }).catch(() => {})
@@ -400,12 +466,16 @@ export async function useLimitReset(name: string): Promise<ResetOutcome> {
     if (outcome.ok) {
       // The provider said it reset the limit, so the old 5-hour window no longer counts, whatever was
       // read since. If the read just now failed, the last reading still has that window and would
-      // hold the account again: keep only its weekly windows.
+      // hold the account again: keep only its weekly windows. The same for the Fable window, which
+      // is written as unused, also into a reading from just now that lists no Fable limit: without
+      // one, the account's panel shows the one from the reading before, still used up.
       const last = limitReadings()[name]
-      if (last && Date.parse(last.observed_at) < now) {
-        saveReading(name, now, Object.fromEntries(Object.entries(last.signals).filter(([k]) => /^anthropic-ratelimit-unified-7d(_oi)?-(utilization|reset)$/i.test(k))))
-      }
-      await releaseFiveHour(f, now).catch((err: Error) => console.error(`Limit reset: ${err.message}`))
+      const at = Date.parse(last?.observed_at ?? '')
+      const kept = Object.entries(last?.signals ?? {}).filter(([k]) => at === now || KEPT_WINDOWS[kind].test(k))
+      const unused = kind === 'fable' && !kept.some(([k]) => k.toLowerCase() === FABLE_UTILIZATION)
+      if (unused) kept.push(...Object.entries(canonical({ [FABLE_UTILIZATION]: '0' })))
+      if (at < now || (at === now && unused)) saveReading(name, now, Object.fromEntries(kept), true)
+      await (kind === 'fable' ? releaseFable(name, now) : releaseFiveHour(f, now)).catch((err: Error) => console.error(`Limit reset: ${err.message}`))
     }
     return outcome
   } finally {
@@ -423,7 +493,7 @@ async function checkNext(now = Date.now()) {
   const held = reserveStatus().accounts
   // Forget credentials that were removed; an empty list is more likely CPA still loading.
   if (files?.length) {
-    for (const name of new Set([...checks.keys(), ...Object.keys(limitResets())])) {
+    for (const name of new Set([...checks.keys(), ...Object.keys(limitResets()), ...Object.keys(limitResets('fable'))])) {
       if (files.some((f) => f.name === name)) continue
       deleteRow.run(name)
       forgetReset(name)

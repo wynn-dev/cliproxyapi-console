@@ -109,6 +109,16 @@ export async function applyFable(files: ListedCredential[], readings: Record<str
   for (const h of tracked.values()) if (now >= h.until) remove.run(h.name)
 }
 
+/**
+ * The provider reset an account's Fable limit on request (limit-checks.ts), so a hold no longer
+ * waits for that window: its Fable models are released. Not for the caller to decide from a
+ * reading, which may show no Fable window at all after a reset.
+ */
+export async function releaseFable(name: string, now = Date.now()) {
+  const held = holds().get(name)
+  if (held) await applyOne(name, held, { seen: true }, now)
+}
+
 async function applyOne(name: string, held: Hold | undefined, { seen, short }: ReturnType<typeof trip>, now: number) {
   if (short) {
     if (held && !held.pending) {

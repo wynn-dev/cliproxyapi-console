@@ -30,20 +30,25 @@ async function serve(handler: (req: { method: string; url: URL; headers: http.In
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 }
 
-// The provider, mocked: what its usage endpoint answers (plainly, and when asked as Claude Code asks
-// at the 5-hour limit), what using a reset answers, and every request it got.
+// The provider, mocked: what its usage endpoint answers (plainly, when asked as Claude Code asks at
+// the 5-hour limit, and when asked about the resets it granted), what using a reset answers, and
+// every request it got.
 const provider = {
-  usage: {} as unknown,
+  usage: {} as object,
   /** The status of a plain usage read, to have it fail. */
   usageStatus: 200,
   atWall: {} as unknown,
+  /** The `cedar_ember` block of an answer about granted resets; left out when undefined. */
+  cedarEmber: undefined as unknown,
   reset: { status: 200, json: {} as unknown },
   requests: [] as { method: string; path: string; query: string; headers: http.IncomingHttpHeaders; body: string }[],
 }
 const providerUrl = await serve(({ method, url, headers, body }) => {
   provider.requests.push({ method, path: url.pathname, query: url.search, headers, body })
   if (method === 'POST') return provider.reset
-  return url.searchParams.has('at_wall') ? { json: provider.atWall } : { status: provider.usageStatus, json: provider.usage }
+  if (url.searchParams.has('at_wall')) return { json: provider.atWall }
+  if (url.searchParams.has('cedar_ember')) return { json: { ...provider.usage, cedar_ember: provider.cedarEmber } }
+  return { status: provider.usageStatus, json: provider.usage }
 })
 
 // CPA's management API, as much of it as limit checks and the Fable reserve use.
@@ -93,7 +98,7 @@ fs.writeFileSync(path.join(data, 'console.json'), JSON.stringify({ managementKey
 mock.method(console, 'error', () => {})
 mock.method(console, 'log', () => {})
 const { claudeSignals, limitCheckStatus, useLimitReset } = await import('../server/limit-checks.ts')
-const { resetStatus } = await import('../server/limit-resets.ts')
+const { fableResetStatus, resetStatus } = await import('../server/limit-resets.ts')
 const { limitReadings, saveReading } = await import('../server/limits.ts')
 const { applyReserve, reserveStatus } = await import('../server/reserve.ts')
 const { applyFable, fableStatus } = await import('../server/fable.ts')
@@ -262,6 +267,7 @@ describe('using a limit reset', () => {
     provider.usage = usage(Date.now(), 100, 60, 30)
     provider.usageStatus = 200
     provider.atWall = {}
+    provider.cedarEmber = undefined
     provider.reset = { status: 200, json: {} }
   })
   const posts = () => provider.requests.filter((r) => r.method === 'POST')
@@ -405,7 +411,9 @@ describe('using a limit reset', () => {
     provider.atWall = { ...usage(Date.now(), 100, 60, 30), juniper_tide: { eligible: true, in_experiment: true, arm: 'reset', available: true, resets_per_week: 1 } }
     assert.equal((await useLimitReset(NAME)).message, 'The provider could not reset the limit right now. Try again in a moment.')
     assert.equal(limitCheckStatus().resets[NAME].state, 'available')
-    assert.deepEqual(provider.requests.filter((r) => r.method === 'GET').map((r) => r.query), ['', '?at_wall=1&skip_spend=1'])
+    // The Fable reset is told at any time, so the check asks about it too, once in a few days.
+    assert.deepEqual(provider.requests.filter((r) => r.method === 'GET').map((r) => r.query), ['', '?at_wall=1&skip_spend=1', '?cedar_ember=1&skip_spend=1'])
+    assert.equal(limitCheckStatus().fableResets[NAME].state, 'not-offered')
 
     // Below the limit there is nothing to ask.
     provider.requests = []
@@ -413,6 +421,219 @@ describe('using a limit reset', () => {
     await useLimitReset(NAME)
     assert.deepEqual(provider.requests.filter((r) => r.method === 'GET').map((r) => r.query), [''])
     assert.equal(limitCheckStatus().resets[NAME].state, 'available')
+  })
+})
+
+describe('fableResetStatus', () => {
+  const now = Date.parse('2026-11-03T09:00:00Z')
+  const ends = now + 20 * D
+  const grant = (more: object = {}) => ({
+    id: 'fable-launch',
+    type: 'full',
+    gives_back_weekly: true,
+    resets_total: 3,
+    resets_left: 2,
+    ends_at: iso(ends),
+    clears: ['seven_day_overage_included'],
+    usable_now: true,
+    ...more,
+  })
+  const status = (...grants: object[]) => fableResetStatus({ eligible: true, at_limit: true, grants }, now)
+
+  test('reads the grants as Claude Code does', () => {
+    assert.deepEqual(status(grant()), { readAt: now, state: 'available', left: 2, endsAt: ends, grantId: 'fable-launch' })
+    // Not at the Fable limit: the resets are left, and none can be used now.
+    assert.deepEqual(status(grant({ usable_now: false })), { readAt: now, state: 'available', left: 2, endsAt: ends, grantId: undefined })
+    assert.deepEqual(status(grant({ clears: ['five_hour'] })), { readAt: now, state: 'available', left: 2, endsAt: ends, grantId: undefined })
+    assert.deepEqual(status(grant({ resets_left: 0 })), { readAt: now, state: 'used' })
+    assert.deepEqual(status(grant({ ends_at: iso(now - H) })), { readAt: now, state: 'used' })
+    assert.deepEqual(status(grant({ paused: true })), { readAt: now, state: 'used' })
+    assert.deepEqual(status(grant({ resets_left: 0 }), grant({ id: 'second', resets_left: 1 })), { readAt: now, state: 'available', left: 1, endsAt: ends, grantId: 'second' })
+  })
+
+  test('a reset of another limit is not a Fable reset', () => {
+    assert.deepEqual(status(grant({ id: 'session-1', type: 'session', gives_back_weekly: false, clears: ['five_hour'] })), { readAt: now, state: 'not-offered' })
+    assert.deepEqual(status(grant({ id: 'Not An Id' })), { readAt: now, state: 'not-offered' })
+    assert.deepEqual(status(), { readAt: now, state: 'not-offered' })
+    assert.deepEqual(fableResetStatus({ eligible: false, ineligible_reason: 'tier', grants: [] }, now), { readAt: now, state: 'not-offered', reason: 'tier' })
+    // An answer without the block: the provider has no such resets for this account.
+    assert.deepEqual(fableResetStatus(undefined, now), { readAt: now, state: 'not-offered' })
+  })
+
+  test('says nothing when the answer does not', () => {
+    assert.equal(fableResetStatus({ grants: [grant()] }, now), undefined)
+    assert.equal(fableResetStatus('soon', now), undefined)
+    assert.equal(fableResetStatus({ eligible: false, ineligible_reason: 'unavailable' }, now), undefined)
+  })
+})
+
+describe('using a Fable reset', () => {
+  const NAME = 'claude-ada.json'
+  const ends = Date.now() + 20 * D
+  let grants = 0
+  /** The provider's answer about the account's resets: one grant of Fable resets, usable now. A new one each time. */
+  const granted = (left = 2, more: object = {}) => ({
+    eligible: true,
+    at_limit: true,
+    grants: [
+      { id: `fable-${++grants}`, type: 'full', gives_back_weekly: true, resets_total: 3, resets_left: left, ends_at: iso(ends), clears: ['seven_day_overage_included'], usable_now: true, ...more },
+    ],
+  })
+  const posts = () => provider.requests.filter((r) => r.method === 'POST')
+  const sent = () => posts().map((r) => JSON.parse(r.body) as { program: string; grant_id: string; request_id: string })
+  const fableReset = () => limitCheckStatus().fableResets[NAME]
+
+  beforeEach(async () => {
+    db.exec('DELETE FROM limit_resets; DELETE FROM limit_checks; DELETE FROM limits; DELETE FROM reserve; DELETE FROM fable_hold')
+    cpa.files = [{ name: NAME, provider: 'claude', account_type: 'oauth', auth_index: 'a1' }]
+    cpa.disk = { [NAME]: { type: 'claude', organization_uuid: ORG } }
+    cpa.cooldownResets = []
+    provider.usageStatus = 200
+    provider.atWall = {}
+    provider.cedarEmber = granted()
+    provider.reset = { status: 200, json: { result: 'reset', resets_left: 1, cleared: ['seven_day_overage_included'] } }
+    // The account at its Fable limit, its Fable models held for the reserve.
+    const now = Date.now()
+    updateState({ reserve: { fable: 10 } })
+    saveReading(NAME, now - 60_000, {
+      [`${P}5h-utilization`]: '0.4',
+      [`${P}5h-reset`]: seconds(now + 2 * H),
+      [`${P}7d-utilization`]: '0.6',
+      [`${P}7d-reset`]: seconds(now + 3 * D),
+      [`${P}7d_oi-utilization`]: '1',
+      [`${P}7d_oi-reset`]: seconds(now + 4 * D),
+    })
+    await applyFable(cpa.files as never, limitReadings(), now)
+    assert.ok(fableStatus()[NAME])
+    assert.deepEqual(cpa.disk[NAME].excluded_models, ['claude-fable-*'])
+    provider.usage = usage(now, 40, 60, 100)
+    provider.requests = []
+  })
+  after(() => updateState({ reserve: { fable: 0 } }))
+
+  /** Whether the Fable models are held, now and after the Fable reserve's next round. */
+  async function held() {
+    const now = [!!fableStatus()[NAME], cpa.disk[NAME].excluded_models]
+    await applyFable(cpa.files as never, limitReadings(), Date.now())
+    assert.deepEqual([!!fableStatus()[NAME], cpa.disk[NAME].excluded_models], now)
+    return now[0]
+  }
+
+  test('asks which reset can be used, uses it as the account and releases the Fable models', async () => {
+    // What the provider reports once the Fable limit is cleared: what Fable used is back in the weekly limit.
+    provider.usage = usage(Date.now(), 40, 45, 0)
+    const out = await useLimitReset(NAME, 'fable')
+    assert.deepEqual([out.ok, out.message], [true, 'The Fable limit was reset. What Fable used this week is back in the weekly limit.'])
+
+    // Asked first, as Claude Code's /limit-reset asks, then the grant it named is used.
+    assert.deepEqual(provider.requests.map((r) => `${r.method} ${r.query}`).slice(0, 2), ['GET ?cedar_ember=1&skip_spend=1', 'POST '])
+    assert.equal(posts().length, 1)
+    assert.equal(posts()[0].path, `/api/organizations/${ORG}/reset_rate_limits`)
+    assert.equal(posts()[0].headers.authorization, 'Bearer token-of-a1')
+    assert.deepEqual(sent()[0], { program: 'cedar_ember', grant_id: `fable-${grants}`, request_id: sent()[0].request_id })
+    assert.match(sent()[0].request_id, /^[A-Za-z0-9_-]{1,64}$/)
+
+    // One of the two is used, and the 5-hour reset is another matter.
+    assert.deepEqual(fableReset(), { readAt: fableReset().readAt, state: 'available', nextAvailableAt: undefined, reason: undefined, left: 1, endsAt: ends })
+    assert.equal(limitCheckStatus().resets[NAME], undefined)
+    assert.equal(await held(), false)
+    assert.equal(cpa.disk[NAME].excluded_models, undefined)
+    const { signals } = limitReadings()[NAME]
+    assert.equal(signals['Anthropic-Ratelimit-Unified-7d_oi-Utilization'], '0')
+    assert.equal(signals['Anthropic-Ratelimit-Unified-7d-Utilization'], '0.45')
+    assert.deepEqual(cpa.cooldownResets, [{ auth_index: 'a1' }])
+  })
+
+  test('the last Fable reset leaves none', async () => {
+    provider.cedarEmber = granted(1)
+    provider.reset = { status: 200, json: { result: 'reset' } }
+    provider.usage = usage(Date.now(), 40, 45, 0)
+    assert.equal((await useLimitReset(NAME, 'fable')).ok, true)
+    assert.equal(fableReset().state, 'used')
+    assert.equal(fableReset().left, undefined)
+  })
+
+  test('a reset releases the Fable models, whatever is read afterwards', async () => {
+    const now = Date.now()
+    // After a reset the provider may leave the Fable limit out, or report it unused with no reset
+    // time, or the read fails and the last reading still has the used-up window.
+    const after: (() => void)[] = [
+      () => (provider.usage = usage(now, 40, 45)),
+      () => (provider.usage = { ...usage(now, 40, 45), limits: [{ kind: 'weekly_scoped', percent: 0, resets_at: null, scope: { model: { display_name: 'Fable' } } }] }),
+      () => (provider.usageStatus = 500),
+    ]
+    for (const answer of after) {
+      answer()
+      assert.equal((await useLimitReset(NAME, 'fable')).ok, true)
+      assert.equal(await held(), false)
+      // The other windows are still known, and the used-up Fable window is not.
+      const signals = Object.fromEntries(Object.entries(limitReadings()[NAME].signals).map(([k, v]) => [k.toLowerCase(), v]))
+      assert.ok(signals[`${P}7d-utilization`])
+      assert.notEqual(signals[`${P}7d_oi-utilization`], '1')
+      assert.equal(signals[`${P}7d_oi-reset`], undefined)
+    }
+  })
+
+  test('says so when the reset was already used, and leaves the hold alone', async () => {
+    provider.reset = { status: 200, json: { result: 'already_used', resets_left: 0 } }
+    const out = await useLimitReset(NAME, 'fable')
+    assert.deepEqual([out.ok, out.message], [false, 'That Fable reset was already used. The limit was not reset.'])
+    assert.equal(fableReset().state, 'used')
+    assert.equal(await held(), true)
+    assert.deepEqual(cpa.cooldownResets, [])
+  })
+
+  test('a failure leaves the hold alone, and trying again repeats the same request', async () => {
+    provider.reset = { status: 500, json: { error: { message: 'Internal error' } } }
+    const out = await useLimitReset(NAME, 'fable')
+    assert.deepEqual([out.ok, out.message], [false, 'The provider answered HTTP 500: Internal error. The limit was not reset.'])
+    assert.deepEqual([fableReset().state, fableReset().left], ['available', 2])
+    assert.equal(await held(), true)
+
+    // The first try may have gone through all the same. Repeated as the same request it can't use a
+    // second reset, and the provider saying it is used means the first one did.
+    provider.reset = { status: 200, json: { result: 'already_used', resets_left: 1 } }
+    provider.usage = usage(Date.now(), 40, 45, 0)
+    const again = await useLimitReset(NAME, 'fable')
+    assert.deepEqual([again.ok, again.message], [true, 'The earlier try went through after all: the Fable limit was reset.'])
+    assert.equal(sent().length, 2)
+    assert.deepEqual(sent()[1], sent()[0])
+    assert.deepEqual([fableReset().state, fableReset().left], ['available', 1])
+    assert.equal(await held(), false)
+
+    // Answered: the next one is a request of its own.
+    provider.reset = { status: 200, json: { result: 'not_limited' } }
+    assert.equal((await useLimitReset(NAME, 'fable')).message, 'The Fable limit was not in effect, so there was nothing to reset.')
+    assert.notEqual(sent()[2].request_id, sent()[0].request_id)
+  })
+
+  test("passes on the provider's refusals in plain words", async () => {
+    provider.reset = { status: 200, json: { result: 'ineligible' } }
+    assert.equal((await useLimitReset(NAME, 'fable')).message, 'The provider does not offer this account a Fable reset right now. The limit was not reset.')
+    assert.equal(fableReset().state, 'not-offered')
+    provider.reset = { status: 200, json: { result: 'cooldown' } }
+    assert.match((await useLimitReset(NAME, 'fable')).message, /Another reset was just started on this account/)
+    provider.reset = { status: 401, json: {} }
+    assert.match((await useLimitReset(NAME, 'fable')).message, /refused this account's sign-in \(HTTP 401\)/)
+    assert.equal(await held(), true)
+  })
+
+  test('never asks for a reset the provider did not say can be used', async () => {
+    // What the provider says about the account's resets, and what the console then says without asking for one.
+    const refusals: [unknown, string][] = [
+      [undefined, 'The provider offers this account no Fable reset.'],
+      [granted(0), 'This account has no Fable reset left.'],
+      [granted(2, { usable_now: false }), "The provider says this account's Fable reset can't be used right now."],
+      // A reset of the 5-hour limit from the same program is not a Fable reset.
+      [granted(2, { type: 'session', gives_back_weekly: false, clears: ['five_hour'] }), 'The provider offers this account no Fable reset.'],
+      [{ eligible: false, ineligible_reason: 'unavailable' }, 'The provider did not say whether this account has a Fable reset left.'],
+    ]
+    for (const [block, message] of refusals) {
+      provider.cedarEmber = block
+      assert.equal((await useLimitReset(NAME, 'fable')).message, `${message} Nothing was used.`)
+    }
+    assert.equal(posts().length, 0)
+    assert.equal(await held(), true)
   })
 })
 

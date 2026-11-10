@@ -269,9 +269,16 @@ export interface LimitChecks {
   accounts: Record<string, LimitCheck>
   /** What the provider last said about each Claude account's limit reset, by credential file name. */
   resets: Record<string, LimitReset>
+  /** The same for each Claude account's Fable reset. */
+  fableResets: Record<string, LimitReset>
 }
 
-/** A Claude account's limit reset: it clears the 5-hour limit, once a week. */
+export type LimitResetKind = '5h' | 'fable'
+
+/**
+ * A Claude account's limit reset: it clears the 5-hour limit, once a week. Or its Fable reset, which
+ * clears the Fable limit: the provider grants a number of them, to use by a date.
+ */
 export interface LimitReset {
   /** When the provider said so (ms). */
   readAt: number
@@ -280,6 +287,10 @@ export interface LimitReset {
   /** When a used reset is available again (ms), if the provider said. */
   nextAvailableAt?: number
   reason?: string
+  /** Fable resets left to use. */
+  left?: number
+  /** When the Fable resets that are left expire (ms), if the provider said. */
+  endsAt?: number
 }
 
 export interface LimitCheck {

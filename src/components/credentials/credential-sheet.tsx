@@ -284,7 +284,12 @@ function SheetBody({
           hint={reading?.observed_at ? `${Date.parse(reading.observed_at) === checkedAt ? 'Checked' : 'Reported'} ${fmtAgo(reading.observed_at)}` : undefined}
         >
           <AccountMeters account={c} reading={reading} older={older} checkedAt={checkedAt} reserve={reserve} now={now} detailed />
-          {c.provider === 'claude' && c.account_type === 'oauth' && <LimitReset account={c} reading={reading} reset={checks?.resets[c.name]} now={now} />}
+          {c.provider === 'claude' && c.account_type === 'oauth' && (
+            <>
+              <LimitReset account={c} reading={reading} reset={checks?.resets[c.name]} now={now} />
+              <LimitReset kind="fable" account={c} reading={reading} older={older} reset={checks?.fableResets[c.name]} now={now} />
+            </>
+          )}
           {signals.length > 0 && (
             <details className="group text-xs">
               <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">

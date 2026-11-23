@@ -19,7 +19,7 @@ import { useNow } from '@/hooks/use-now'
 import { fmtAgo } from '@/lib/format'
 import { accountReadings, gaugeKey, limitWindows, poolLimits } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
-import { queries, useGaugesWrite } from '@/lib/queries'
+import { queries, useGaugeToggle } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
 import type { Credential, LimitCheck, ReserveStatus } from '@/lib/types'
 
@@ -39,7 +39,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const checks = useQuery({ ...queries.limitChecks(), enabled: running })
   const config = useQuery({ ...queries.config(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
-  const hiddenList = useQuery(queries.gauges()).data?.hidden
+  const hiddenList = useQuery({ ...queries.gauges(), enabled: running }).data?.hidden
   const hidden = new Set(hiddenList)
   const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
   const routing = routingOf(config.data)
@@ -76,7 +76,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
         <CardTitle>Accounts</CardTitle>
         <CardDescription>How much of each usage limit is left, as each provider last reported it. Select an account for details.</CardDescription>
         <CardAction className="flex items-center gap-1">
-          {running && gauges.size > 0 && <GaugePicker gauges={gauges} hidden={hiddenList ?? []} />}
+          {running && gauges.size > 0 && <GaugePicker gauges={gauges} hidden={hiddenList} />}
           <Button variant="ghost" size="sm" asChild>
             <Link to="/credentials">
               Manage <ArrowRightIcon />
@@ -266,10 +266,18 @@ function AccountRow({
  * Which limit gauges the Overview shows, saved in the console so it holds for every browser. Only
  * what is shown here: the account panel still shows every limit, and the reserve ignores this.
  */
-function GaugePicker({ gauges, hidden }: { gauges: Map<string, string>; hidden: string[] }) {
-  const write = useGaugesWrite()
+function GaugePicker({ gauges, hidden }: { gauges: Map<string, string>; hidden?: string[] }) {
+  const toggle = useGaugeToggle()
+  // Until the saved choice is in, there is nothing to change it from.
+  if (!hidden) {
+    return (
+      <Button variant="ghost" size="sm" disabled>
+        <GaugeIcon />
+        Gauges
+      </Button>
+    )
+  }
   const shown = [...gauges.keys()].filter((k) => !hidden.includes(k)).length
-  const toggle = (key: string, on: boolean) => write.mutate(on ? hidden.filter((k) => k !== key) : [...hidden, key])
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -287,7 +295,7 @@ function GaugePicker({ gauges, hidden }: { gauges: Map<string, string>; hidden: 
         <div className="px-2 pt-1 pb-1.5 text-xs text-muted-foreground">Limits shown here. Account panels still show every limit.</div>
         {[...gauges].map(([key, label]) => (
           <label key={key} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-            <Checkbox checked={!hidden.includes(key)} onCheckedChange={(v) => toggle(key, v === true)} />
+            <Checkbox checked={!hidden.includes(key)} onCheckedChange={(v) => toggle.mutate({ gauge: key, shown: v === true })} />
             {label}
           </label>
         ))}

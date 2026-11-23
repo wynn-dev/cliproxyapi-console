@@ -113,23 +113,24 @@ export function useOrderWrite() {
   })
 }
 
-/** Saves which limit gauges the Overview leaves out; shown at once, put back if saving fails. */
-export function useGaugesWrite() {
+/**
+ * Shows or hides one of the Overview's limit gauges. Only that gauge is sent, so toggles in quick
+ * succession each stick; each shows at once, and the saved list is read back once the last one is done.
+ */
+export function useGaugeToggle() {
   const qc = useQueryClient()
   const key = queries.gauges().queryKey
+  const mutationKey = ['console', 'gauges', 'toggle']
   return useMutation({
-    mutationFn: (hidden: string[]) => consoleApi<{ hidden: string[] }>('/gauges', { method: 'PUT', body: { hidden } }),
-    onMutate: async (hidden) => {
+    mutationKey,
+    mutationFn: ({ gauge, shown }: { gauge: string; shown: boolean }) => consoleApi<{ hidden: string[] }>('/gauges', { method: 'PATCH', body: { gauge, shown } }),
+    onMutate: async ({ gauge, shown }) => {
       await qc.cancelQueries({ queryKey: key })
-      const before = qc.getQueryData(key)
-      qc.setQueryData(key, { hidden })
-      return { before }
+      qc.setQueryData(key, (d: { hidden: string[] } | undefined) => d && { hidden: [...d.hidden.filter((g) => g !== gauge), ...(shown ? [] : [gauge])] })
     },
-    onSuccess: (saved) => qc.setQueryData(key, saved),
-    onError: (err, _hidden, ctx) => {
-      qc.setQueryData(key, ctx?.before)
-      toast.error('Could not save', { description: err.message })
-    },
+    onError: (err) => toast.error('Could not save', { description: err.message }),
+    // An answer can arrive before an earlier one, so the list is only read back after the last.
+    onSettled: () => (qc.isMutating({ mutationKey }) === 1 ? qc.invalidateQueries({ queryKey: key }) : undefined),
   })
 }
 

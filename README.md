@@ -76,7 +76,9 @@ and offers no Gemini CLI or Gemini API key sign-in for subscriptions.
 Antigravity accounts show **no limits**. CLIProxyAPI learns nothing about their quota from their traffic and keeps none,
 and the only way to read it, the Antigravity app's own quota call, could only be sent from the console through
 CLIProxyAPI's generic `api-call`, which would not look exactly like the app. So there are no meters, no reserve and no
-limits added up for these accounts; when a model runs out, CLIProxyAPI cools it down on that account and moves on.
+limits added up for these accounts. When a model runs out, CLIProxyAPI cools it down on that account and moves on, as
+long as cooldowns are on (**Settings → Routing → Disable cooldowns** off, the default, with no provider or credential
+turning them off); with cooldowns off it keeps sending to the used-up account.
 Signed-out accounts are taken out of rotation like Claude and Codex ones. Smart account order, the run-out forecast and
 API key fallback cover Claude and Codex only.
 

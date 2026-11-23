@@ -245,13 +245,15 @@ const gauges = () => ({ hidden: readState().hiddenGauges ?? [] })
 
 app.get('/console/api/gauges', (c) => c.json(gauges()))
 
-app.put('/console/api/gauges', async (c) => {
-  const body: { hidden?: unknown } = await c.req.json().catch(() => ({}))
-  const hidden = body.hidden
-  if (!Array.isArray(hidden) || hidden.length > 200 || !hidden.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 200)) {
-    return c.json({ error: 'hidden must be a list of gauge names' }, 400)
-  }
-  updateState({ hiddenGauges: [...new Set(hidden as string[])] })
+// One gauge at a time, applied to the saved list, so quick toggles from one or more browsers each stick.
+app.patch('/console/api/gauges', async (c) => {
+  const body: { gauge?: unknown; shown?: unknown } = await c.req.json().catch(() => ({}))
+  const { gauge, shown } = body
+  if (typeof gauge !== 'string' || !gauge || gauge.length > 200) return c.json({ error: 'gauge must be a gauge name' }, 400)
+  if (typeof shown !== 'boolean') return c.json({ error: 'shown must be true or false' }, 400)
+  const hidden = gauges().hidden.filter((g) => g !== gauge)
+  if (!shown && hidden.length >= 200) return c.json({ error: 'Too many hidden gauges' }, 400)
+  updateState({ hiddenGauges: shown ? hidden : [...hidden, gauge] })
   return c.json(gauges())
 })
 

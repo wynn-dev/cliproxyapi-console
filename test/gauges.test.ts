@@ -33,21 +33,31 @@ describe('Overview gauges', () => {
     assert.deepEqual(await res.json(), { hidden: [] })
   })
 
-  test('saves the hidden gauges with the console settings, once each', async () => {
-    const hidden = [gaugeKey('codex', 'Weekly'), gaugeKey('claude', 'Fable'), gaugeKey('codex', 'Weekly')]
-    const res = await call('PUT', { hidden })
-    assert.equal(res.status, 200)
-    assert.deepEqual(await res.json(), { hidden: ['codex:Weekly', 'claude:Fable'] })
-    assert.deepEqual(readState().hiddenGauges, ['codex:Weekly', 'claude:Fable'])
+  test('hides and shows one gauge at a time, saved with the console settings', async () => {
+    assert.deepEqual(await (await call('PATCH', { gauge: gaugeKey('codex', 'Weekly'), shown: false })).json(), { hidden: ['codex:Weekly'] })
+    // Hiding it again changes nothing.
+    assert.deepEqual(await (await call('PATCH', { gauge: gaugeKey('codex', 'Weekly'), shown: false })).json(), { hidden: ['codex:Weekly'] })
+    assert.deepEqual(await (await call('PATCH', { gauge: gaugeKey('claude', 'Fable'), shown: false })).json(), { hidden: ['codex:Weekly', 'claude:Fable'] })
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'console.json'), 'utf8')).hiddenGauges, ['codex:Weekly', 'claude:Fable'])
-    assert.deepEqual(await (await call('GET')).json(), { hidden: ['codex:Weekly', 'claude:Fable'] })
+    assert.deepEqual(await (await call('PATCH', { gauge: gaugeKey('codex', 'Weekly'), shown: true })).json(), { hidden: ['claude:Fable'] })
+    assert.deepEqual(await (await call('GET')).json(), { hidden: ['claude:Fable'] })
   })
 
-  test('refuses anything but a list of names', async () => {
-    for (const hidden of [undefined, 'claude:5h', [1], [''], Array.from({ length: 201 }, (_, i) => `x:${i}`)]) {
-      assert.equal((await call('PUT', { hidden })).status, 400)
+  test('toggles sent at once each stick', async () => {
+    await Promise.all([
+      call('PATCH', { gauge: gaugeKey('claude', '5h'), shown: false }),
+      call('PATCH', { gauge: gaugeKey('claude', 'Weekly'), shown: false }),
+      call('PATCH', { gauge: gaugeKey('claude', 'Fable'), shown: true }),
+    ])
+    assert.deepEqual(new Set(readState().hiddenGauges), new Set(['claude:5h', 'claude:Weekly']))
+  })
+
+  test('refuses anything but one gauge name and whether it is shown', async () => {
+    for (const body of [{}, { gauge: 'claude:5h' }, { gauge: '', shown: false }, { gauge: 1, shown: false }, { gauge: 'claude:5h', shown: 'no' }, { hidden: ['claude:5h'] }]) {
+      assert.equal((await call('PATCH', body)).status, 400)
     }
-    assert.deepEqual(readState().hiddenGauges, ['codex:Weekly', 'claude:Fable'])
+    assert.equal((await call('PUT', { hidden: [] })).status, 404)
+    assert.deepEqual(new Set(readState().hiddenGauges), new Set(['claude:5h', 'claude:Weekly']))
   })
 
   test('needs the management key', async () => {

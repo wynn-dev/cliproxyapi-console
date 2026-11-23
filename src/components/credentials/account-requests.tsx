@@ -37,13 +37,13 @@ export function AccountRequests({ authIndex }: { authIndex: string }) {
 
   return (
     <>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-4">
         <MiniStat label="Requests" value={t ? fmtNumber(t.requests) : undefined} />
         <MiniStat label="Failed" value={t ? fmtNumber(t.failed) : undefined} />
         <MiniStat label="Success rate" value={t ? (t.requests ? fmtPercent(1 - t.failed / t.requests) : '—') : undefined} />
       </div>
       {!!t?.requests && (
-        <div className="space-y-1.5 rounded-lg border p-3">
+        <div className="space-y-1.5">
           <RequestSparkline buckets={buckets} className="h-12 gap-0 [&>div]:w-auto [&>div]:flex-1" />
           <div className="flex justify-between text-xs text-muted-foreground tabular">
             <span>24h ago</span>
@@ -54,11 +54,11 @@ export function AccountRequests({ authIndex }: { authIndex: string }) {
       {!latest.data ? (
         <Skeleton className="h-24 w-full" />
       ) : latest.data.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">No requests in the last 24 hours.</p>
+        <p className="py-2 text-sm text-muted-foreground">No requests in the last 24 hours.</p>
       ) : (
-        <ul className="divide-y rounded-lg border text-sm">
+        <ul className="divide-y border-y text-sm">
           {latest.data.map((r) => (
-            <li key={r.id} className="flex items-center gap-3 px-3 py-2">
+            <li key={r.id} className="flex items-center gap-3 py-2">
               <span className="w-12 shrink-0 text-xs text-muted-foreground tabular" title={new Date(r.ts).toLocaleString()}>
                 {format(r.ts, 'HH:mm')}
               </span>
@@ -84,7 +84,7 @@ export function AccountRequests({ authIndex }: { authIndex: string }) {
 
 function MiniStat({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
-    <div className="rounded-lg border px-3 py-2">
+    <div>
       <div className="text-xs text-muted-foreground">{label}</div>
       {value === undefined ? <Skeleton className="my-1 h-5 w-12" /> : <div className="text-lg font-semibold tracking-tight tabular">{value}</div>}
     </div>

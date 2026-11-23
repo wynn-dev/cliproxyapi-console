@@ -28,7 +28,6 @@ import {
 import { useMemo, useRef, useState } from 'react'
 import { RequestSparkline } from '@/components/common'
 import { confirm } from '@/components/confirm'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -123,16 +122,11 @@ function buildColumns(h: React.RefObject<Handlers>): ColumnDef<Credential>[] {
       header: ({ column }) => <SortHeader label="Account" column={column} />,
       cell: ({ row: { original: c } }) => (
         <div className="min-w-0 space-y-0.5">
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate font-medium">{accountName(c)}</span>
-            <Badge variant="secondary" className="h-4.5 px-1.5 text-[11px]">
-              {providerLabel(c.provider)}
-            </Badge>
-            {c.id_token?.plan_type && (
-              <Badge variant="outline" className="h-4.5 px-1.5 text-[11px] capitalize">
-                {c.id_token.plan_type}
-              </Badge>
-            )}
+            <span className="shrink-0 text-xs text-muted-foreground capitalize">
+              {[providerLabel(c.provider), c.id_token?.plan_type].filter(Boolean).join(' · ')}
+            </span>
           </div>
           <div className="truncate font-mono text-xs text-muted-foreground">
             {c.name}
@@ -406,11 +400,11 @@ export function CredentialsTable({
           value={status}
           onValueChange={(v) => v && setStatus(v as StatusFilter)}
           aria-label="Status"
-          className="-m-1 max-w-full overflow-x-auto p-1"
+          className="max-w-full overflow-x-auto"
         >
           {/* Signed out is rare: only shown while it applies. */}
           {STATUS_FILTERS.filter((s) => s.value !== 'signed-out' || statusCounts[s.value] || status === s.value).map((s) => (
-            <ToggleGroupItem key={s.value} value={s.value} className="gap-1.5 px-2.5 data-[state=on]:font-medium">
+            <ToggleGroupItem key={s.value} value={s.value} className="gap-1.5 px-2">
               {s.value !== 'all' && <span className={cn('size-1.5 rounded-full', DOT[s.value])} />}
               {s.label}
               <span className={cn('text-xs tabular', statusCounts[s.value] ? 'text-muted-foreground' : 'text-muted-foreground/50')}>
@@ -438,9 +432,9 @@ export function CredentialsTable({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="border-t">
         <Table>
-          <TableHeader className="bg-muted/40">
+          <TableHeader>
             {table.getHeaderGroups().map((hg) => (
               <TableRow key={hg.id} className="hover:bg-transparent">
                 {hg.headers.map((header) => (
@@ -506,7 +500,7 @@ export function CredentialsTable({
       </div>
 
       {selected.length > 0 && (
-        <div className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-1 rounded-xl border bg-popover p-1.5 pl-3 shadow-lg animate-in fade-in-0 slide-in-from-bottom-2">
+        <div className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-1 rounded-lg border bg-popover p-1.5 pl-3 shadow-lg animate-in fade-in-0 slide-in-from-bottom-2">
           <span className="mr-2 text-sm font-medium tabular">{selected.length} selected</span>
           <Button
             variant="ghost"

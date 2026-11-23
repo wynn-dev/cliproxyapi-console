@@ -190,7 +190,7 @@ function Recap({ month, oldest, inProgress, hasPrevious }: { month: string; olde
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4 rounded-xl border p-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-y py-4">
         <div className="flex items-center gap-2">
           <Switch
             id="wrapped-names"
@@ -282,7 +282,7 @@ function SlideFrame({
 
   return (
     <section className="max-w-[1200px] space-y-2">
-      <div ref={box} className="overflow-hidden rounded-xl border" style={{ height: H * scale }}>
+      <div ref={box} className="overflow-hidden rounded-md border" style={{ height: H * scale }}>
         <div style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
           <SlideCanvas ref={node} accent={accent} month={month}>
             {children}

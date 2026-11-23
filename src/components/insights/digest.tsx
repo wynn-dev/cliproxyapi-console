@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { CircleAlertIcon, CircleCheckIcon, InfoIcon } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { fmtCompact, fmtDuration, fmtNumber, fmtUsd, fmtWhen } from '@/lib/format'
@@ -113,31 +112,29 @@ export function DigestCard() {
 
 function AccountTable({ data, name }: { data: DigestReport; name: (n: string) => string }) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="overflow-x-auto">
       <table className="w-full min-w-[38rem] text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">
-            <th className="px-3 py-2 text-left font-medium">Account</th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap" title="Every attempt, so a request that failed over counts on each account it tried">
+            <th className="py-2 pr-3 text-left font-normal">Account</th>
+            <th className="px-3 py-2 text-right font-normal whitespace-nowrap" title="Every attempt, so a request that failed over counts on each account it tried">
               Attempts
             </th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Tokens</th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap" title="At public API prices">
+            <th className="px-3 py-2 text-right font-normal whitespace-nowrap">Tokens</th>
+            <th className="px-3 py-2 text-right font-normal whitespace-nowrap" title="At public API prices">
               Value
             </th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Peak weekly use</th>
-            <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Reached reserve</th>
+            <th className="px-3 py-2 text-right font-normal whitespace-nowrap">Peak weekly use</th>
+            <th className="px-3 py-2 text-right font-normal whitespace-nowrap">Reached reserve</th>
           </tr>
         </thead>
         <tbody className="divide-y">
           {data.accounts.map((a) => (
             <tr key={a.name}>
-              <td className="max-w-56 px-3 py-2">
-                <div className="flex min-w-0 items-center gap-1.5">
+              <td className="max-w-56 py-2 pr-3">
+                <div className="flex min-w-0 items-baseline gap-2">
                   <span className="truncate">{name(a.name)}</span>
-                  <Badge variant="secondary" className="h-4.5 px-1.5 text-[11px]">
-                    {providerLabel(a.provider)}
-                  </Badge>
+                  <span className="shrink-0 text-xs text-muted-foreground">{providerLabel(a.provider)}</span>
                 </div>
               </td>
               <td className="px-3 py-2 text-right whitespace-nowrap tabular">

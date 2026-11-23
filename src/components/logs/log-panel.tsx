@@ -24,7 +24,7 @@ export function LogPanel({
   return (
     <div
       className={cn(
-        'relative h-[calc(100svh-19.5rem)] min-h-80 overflow-hidden rounded-xl border bg-muted/40 dark:bg-black/40',
+        'relative h-[calc(100svh-19.5rem)] min-h-80 overflow-hidden rounded-md border bg-muted/40 dark:bg-black/30',
         className,
       )}
     >

@@ -6,14 +6,10 @@ import {
   ArrowUpCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  CircleGaugeIcon,
-  CoinsIcon,
   PlayIcon,
   PlugIcon,
   RotateCwIcon,
   SquareIcon,
-  TimerIcon,
-  ZapIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -64,7 +60,6 @@ function Overview() {
     <>
       <PageHeader
         title="Overview"
-        description="Health of your CLIProxyAPI instance and the last 24 hours of traffic."
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link to="/connect">
@@ -74,45 +69,37 @@ function Overview() {
           </Button>
         }
       />
-      <ProcessCard status={status} />
-      <ForecastLine />
-      <PoolAvailability running={running} />
-      <AccountsCard running={running} account={account} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Requests · 24h" icon={ZapIcon} loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
-        <StatCard
-          label="Success rate"
-          icon={CircleGaugeIcon}
-          loading={!usage.data}
-          value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'}
-          hint="Across all credentials"
-        />
-        <StatCard
-          label="Tokens · 24h"
-          icon={CoinsIcon}
-          loading={!usage.data}
-          value={fmtCompact(t?.total)}
-          hint={t?.total ? `${fmtCompact(t.input)} in · ${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
-        />
-        <StatCard label="Avg latency" icon={TimerIcon} loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
+      <div className="-mt-4 space-y-1.5">
+        <ProcessCard status={status} />
+        <ForecastLine />
       </div>
+      <PoolAvailability running={running} />
+      <div>
+        <AccountsCard running={running} account={account} />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
-            <CardTitle>Requests</CardTitle>
-            <CardDescription>Last 24 hours</CardDescription>
+            <CardTitle>Last 24 hours</CardTitle>
+            <CardDescription>Every request through the proxy</CardDescription>
             <CardAction>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/usage">
-                  Usage <ArrowRightIcon />
-                </Link>
-              </Button>
+              <Link to="/usage" className="inline-flex items-center gap-1 text-[0.8rem] text-link hover:underline">
+                Usage <ArrowRightIcon className="size-3.5" />
+              </Link>
             </CardAction>
           </CardHeader>
-          <CardContent>
-            {usage.data ? <RequestsChart series={usage.data.series} bucketMs={usage.data.bucketMs} /> : <Skeleton className="h-64 w-full" />}
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4">
+              <StatCard label="Requests" loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
+              <StatCard label="Success rate" loading={!usage.data} value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'} hint="Across all credentials" />
+              <StatCard
+                label="Tokens"
+                loading={!usage.data}
+                value={fmtCompact(t?.total)}
+                hint={t?.total ? `${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
+              />
+              <StatCard label="Avg latency" loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
+            </div>
+            {usage.data ? <RequestsChart series={usage.data.series} bucketMs={usage.data.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
           </CardContent>
         </Card>
         <Card>
@@ -126,13 +113,12 @@ function Overview() {
                 key: m.key,
                 label: m.key || 'unknown',
                 value: m.requests,
-                hint: `${fmtCompact(m.total)} tok`,
+                hint: `${fmtCompact(m.total)} tokens`,
               }))}
             />
           </CardContent>
         </Card>
       </div>
-
     </>
   )
 }
@@ -141,7 +127,7 @@ function Overview() {
 function KeepRunning({ command }: { command: string }) {
   return (
     <Dialog>
-      <DialogTrigger className="text-foreground underline underline-offset-4">Keep it running</DialogTrigger>
+      <DialogTrigger className="text-link hover:underline">Keep it running</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Keep the console running</DialogTitle>
@@ -189,7 +175,7 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
     setExpanded(open)
   }
 
-  if (!status) return <Skeleton className="h-12 w-full rounded-xl" />
+  if (!status) return <Skeleton className="h-6 w-80 max-w-full" />
   const { process: p, cpa } = status
   const meta = PROCESS_LABEL[p.state]
   const install = cpa.install
@@ -215,18 +201,18 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
 
   if (folded) {
     return (
-      <Card size="sm" className="py-0">
-        <div className="flex flex-wrap items-center gap-x-3 px-(--card-spacing)">
+      <div>
+        <div className="flex flex-wrap items-center gap-x-3">
           <button
             ref={toggle}
             type="button"
             aria-expanded={false}
-            className="flex min-w-0 flex-1 items-center gap-x-2.5 py-3 text-left max-sm:basis-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="-mx-1.5 flex min-w-0 items-center gap-x-2 rounded-md px-1.5 py-1 text-left text-[0.84rem] outline-none hover:bg-foreground/[0.035] focus-visible:ring-2 focus-visible:ring-ring/50 max-sm:basis-full"
             onClick={() => setOpen(true)}
           >
             <StatusDot tone={meta.tone} pulse={p.state === 'starting'} />
             <span className="min-w-0 flex-1">
-              <span className="font-medium">CLIProxyAPI</span>
+              <span>CLIProxyAPI</span>
               <span className="text-muted-foreground tabular">
                 {' · '}
                 {[meta.label.toLowerCase(), cpa.version, uptime && `up ${uptime}`].filter(Boolean).join(' · ')}
@@ -236,30 +222,24 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
               </span>
             </span>
             {install?.phase === 'error' ? (
-              <Badge variant="outline" className="shrink-0 border-critical/30 text-critical">
-                Update failed
-              </Badge>
+              <span className="shrink-0 text-critical">Update failed</span>
             ) : (
               updateAvailable && (
-                <Badge variant="outline" className="shrink-0 gap-1 border-chart-1/30 text-chart-1">
-                  <ArrowUpCircleIcon />
-                  <span className="max-sm:hidden">Update available</span>
-                  <span className="sm:hidden">Update</span>
-                </Badge>
+                <span className="inline-flex shrink-0 items-center gap-1 text-link">
+                  <ArrowUpCircleIcon className="size-3.5" />
+                  Update available
+                </span>
               )
             )}
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <span className="max-sm:sr-only">Details</span>
-              <ChevronDownIcon className="size-4" />
-            </span>
+            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Details" />
           </button>
           {!status.service && (
-            <span className="-mt-1.5 pb-3 pl-4.5 text-xs text-muted-foreground sm:mt-0 sm:pb-0 sm:pl-0">
+            <span className="text-[0.84rem] text-muted-foreground">
               <KeepRunning command={status.serviceCommand} />
             </span>
           )}
         </div>
-      </Card>
+      </div>
     )
   }
 
@@ -353,7 +333,7 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
         )}
 
         {installing && install && (
-          <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+          <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2 font-medium">
                 <Spinner /> Installing {install.tag} · {install.phase}
@@ -374,12 +354,12 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
           </Alert>
         )}
         {updateAvailable && !installing && latest.data && (
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-chart-1/30 bg-chart-1/5 p-3 text-sm">
-            <ArrowUpCircleIcon className="size-4 text-chart-1" />
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <ArrowUpCircleIcon className="size-4 text-link" />
             <span className="flex-1">
               <span className="font-medium">{latest.data.tag}</span> is available
               <span className="text-muted-foreground"> · released {fmtAgo(latest.data.publishedAt)} · </span>
-              <a href={latest.data.url} target="_blank" rel="noreferrer" className="underline underline-offset-4">
+              <a href={latest.data.url} target="_blank" rel="noreferrer" className="text-link hover:underline">
                 Release notes
               </a>
             </span>

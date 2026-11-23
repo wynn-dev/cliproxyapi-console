@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { BadgeDollarSignIcon, BanIcon, ChartNoAxesColumnIcon, CircleGaugeIcon, CoinsIcon, EllipsisIcon, TimerIcon, Trash2Icon, TriangleAlertIcon, ZapIcon } from 'lucide-react'
+import { ChartNoAxesColumnIcon, EllipsisIcon, Trash2Icon, TriangleAlertIcon } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { PageHeader, StatCard, StatusDot } from '@/components/common'
@@ -59,7 +59,6 @@ function UsagePage() {
     <>
       <PageHeader
         title="Usage"
-        description="Every request that went through the proxy, kept by this console. A request counts once, however many accounts it tried."
         actions={
           <>
             <CollectorHealth />
@@ -114,65 +113,63 @@ function UsagePage() {
           </EmptyContent>
         </Empty>
       ) : (
-        <div className={cn('space-y-6 transition-opacity', refreshing && 'opacity-60')}>
-          <div className="grid grid-cols-2 gap-4 max-sm:gap-3 lg:grid-cols-3">
+        <div className={cn('transition-opacity', refreshing && 'opacity-60')}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Totals</CardTitle>
+              <CardDescription>{RANGES[range].label}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-3">
             <StatCard
               label="Requests"
-              icon={ZapIcon}
               loading={!s}
               value={fmtNumber(t?.requests)}
               hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'}
             />
             <StatCard
               label="Success rate"
-              icon={CircleGaugeIcon}
               loading={!s}
               value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'}
               hint={t && `${fmtNumber(t.requests - t.failed)} succeeded${t.recovered ? `, ${fmtNumber(t.recovered)} after a retry` : ''}`}
             />
             <StatCard
               label="Turned away"
-              icon={BanIcon}
               loading={!s}
               value={fmtNumber(t?.turnedAway)}
               hint={<TurnedAwayHint turnedAway={t?.turnedAway ?? 0} />}
             />
             <StatCard
               label="Value at API prices"
-              icon={BadgeDollarSignIcon}
               loading={!s}
               value={t ? (t.value === 0 && t.unpricedTokens > 0 ? 'No price' : fmtUsd(t.value)) : '—'}
               hint={t && <ValueHint summary={s} labels={labels} />}
             />
             <StatCard
               label="Tokens"
-              icon={CoinsIcon}
               loading={!s}
               value={fmtCompact(t?.total)}
               hint={t?.total ? `${fmtCompact(t.input)} in · ${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
             />
             <StatCard
               label="Avg latency"
-              icon={TimerIcon}
               loading={!s}
               value={fmtMs(t?.avgLatency)}
               hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined}
             />
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <ChartCard title="Requests" description={subtitle}>
-              {s ? <RequestsChart series={s.series} bucketMs={s.bucketMs} /> : <Skeleton className="h-64 w-full" />}
-            </ChartCard>
-            <ChartCard title="Tokens" description={subtitle}>
-              {s ? <TokensChart series={s.series} bucketMs={s.bucketMs} /> : <Skeleton className="h-64 w-full" />}
-            </ChartCard>
-          </div>
+          <ChartCard title="Requests" description={subtitle}>
+            {s ? <RequestsChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
+          </ChartCard>
+          <ChartCard title="Tokens" description={subtitle}>
+            {s ? <TokensChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
+          </ChartCard>
           <ChartCard title="Average latency" description={`${subtitle} · full request duration`}>
-            {s ? <LatencyChart series={s.series} bucketMs={s.bucketMs} /> : <Skeleton className="h-48 w-full" />}
+            {s ? <LatencyChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-40 w-full" /> : <Skeleton className="h-40 w-full" />}
           </ChartCard>
 
-          {s ? <Breakdown summary={s} labels={labels} /> : <Skeleton className="h-72 w-full rounded-xl" />}
+          {s ? <Breakdown summary={s} labels={labels} /> : <Skeleton className="h-72 w-full" />}
         </div>
       )}
 

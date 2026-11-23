@@ -113,19 +113,19 @@ export function ForecastLine() {
     .filter((l) => l.weekly || l.fiveHour)
   if (!lines.length) return null
   return (
-    <div className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl px-4 py-3 text-sm ring-1 ring-foreground/10">
+    <div className="flex flex-wrap items-start gap-x-4 gap-y-1 text-[0.84rem]">
       <ul className="min-w-0 flex-1 basis-full space-y-1 sm:basis-0">
         {lines.map((l) => (
           <li key={l.provider} className="flex items-baseline gap-2">
             <StatusDot tone={l.weekly?.tone ?? 'warn'} className="translate-y-[-1px]" />
             <span>
-              <span className="font-medium">{providerLabel(l.provider)}:</span> {l.weekly?.text}
+              <span>{providerLabel(l.provider)}:</span> <span className="text-muted-foreground">{l.weekly?.text}</span>
               {l.fiveHour && <span className={l.weekly ? 'text-muted-foreground' : undefined}> {l.fiveHour}</span>}
             </span>
           </li>
         ))}
       </ul>
-      <Link to="/insights" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground max-sm:pl-4">
+      <Link to="/insights" className="inline-flex items-center gap-1 text-link hover:underline max-sm:pl-4">
         Insights <ArrowRightIcon className="size-3.5" />
       </Link>
     </div>

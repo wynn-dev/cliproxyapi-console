@@ -365,7 +365,7 @@ function BrowserFlow({ flow, onSubmitted }: { flow: Flow; onSubmitted: () => voi
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium tabular">{n}</span>
+      <span className="w-3 shrink-0 text-sm leading-6 text-muted-foreground tabular">{n}</span>
       <div className="min-w-0 flex-1 space-y-2 pt-0.5">
         <div className="font-medium">{title}</div>
         {children}
@@ -471,7 +471,7 @@ function UploadPanel({ onDone }: { onDone: () => void }) {
       />
 
       {files.length > 0 && (
-        <ul className="max-h-56 divide-y overflow-y-auto rounded-lg border">
+        <ul className="max-h-56 divide-y overflow-y-auto border-y">
           {files.map((f) => {
             const r = results?.[f.name]
             return (

@@ -54,12 +54,12 @@ function ProvidersPage() {
           <AlertDescription>{config.error.message}</AlertDescription>
         </Alert>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        <div className="space-y-2">
           <ProviderNav config={config.data} loading={config.isLoading} active={meta.id} onSelect={(id) => navigate({ search: { provider: id }, replace: true })} />
           {config.isLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-10 w-1/2" />
-              <Skeleton className="h-48 w-full rounded-xl" />
+              <Skeleton className="h-48 w-full" />
             </div>
           ) : (
             <ProviderPanel key={meta.id} meta={meta} groups={groupsOf(config.data, meta.id)} />
@@ -82,7 +82,7 @@ function ProviderNav({
   onSelect: (id: string) => void
 }) {
   return (
-    <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0" aria-label="Providers">
+    <nav className="-mx-4 flex gap-5 overflow-x-auto border-b px-4 md:mx-0 md:px-0" aria-label="Providers">
       {API_KEY_PROVIDERS.map((p) => {
         const groups = groupsOf(config, p.id)
         const keys = groups.reduce((n, g) => n + (g.keys?.length ?? 0), 0)
@@ -93,15 +93,14 @@ function ProviderNav({
             type="button"
             aria-current={p.id === active ? 'page' : undefined}
             onClick={() => onSelect(p.id)}
+            title={loading || empty ? 'Not configured' : `${groups.length} ${groups.length === 1 ? 'group' : 'groups'} · ${keys} ${keys === 1 ? 'key' : 'keys'}`}
             className={cn(
-              'flex shrink-0 flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-muted',
-              p.id === active && 'bg-muted',
+              'flex shrink-0 items-center gap-1.5 rounded-sm pt-1 pb-2.5 text-[0.84rem] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
+              p.id === active && 'text-foreground shadow-[inset_0_-1.5px_0_var(--foreground)]',
             )}
           >
-            <span className={cn('font-medium', empty && p.id !== active && 'text-muted-foreground')}>{p.name}</span>
-            <span className="text-xs text-muted-foreground tabular">
-              {loading ? '…' : empty ? 'Not configured' : `${groups.length} ${groups.length === 1 ? 'group' : 'groups'} · ${keys} ${keys === 1 ? 'key' : 'keys'}`}
-            </span>
+            {p.name}
+            {!loading && !empty && <span className="text-xs text-muted-foreground tabular">{keys}</span>}
           </button>
         )
       })}
@@ -163,14 +162,11 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
   }
 
   return (
-    <div className="min-w-0 space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="space-y-0.5">
-          <h2 className="text-lg font-semibold tracking-tight">{meta.name}</h2>
-          <p className="text-sm text-muted-foreground">{PROVIDER_INFO[meta.id].description}</p>
-        </div>
+    <div className="min-w-0">
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-3 py-2">
+        <p className="text-[0.84rem] text-muted-foreground">{PROVIDER_INFO[meta.id].description}</p>
         {groups.length > 0 && (
-          <Button size="sm" onClick={() => openEditor(null)}>
+          <Button variant="outline" size="sm" onClick={() => openEditor(null)}>
             <PlusIcon />
             Add group
           </Button>
@@ -178,7 +174,7 @@ function ProviderPanel({ meta, groups }: { meta: ProviderMeta; groups: ApiKeyGro
       </div>
 
       {groups.length === 0 ? (
-        <Empty className="border py-12">
+        <Empty className="border-t py-12">
           <EmptyHeader>
             <EmptyMedia variant="icon">
               <BlocksIcon />

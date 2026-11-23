@@ -12,7 +12,7 @@ function Logs() {
     <>
       <PageHeader title="Logs" description="Tail CLIProxyAPI's application log, its process output, and per-request logs." />
       <Tabs defaultValue="app" className="gap-4">
-        <TabsList>
+        <TabsList className="w-full justify-start border-b">
           <TabsTrigger value="app">Application log</TabsTrigger>
           <TabsTrigger value="output">Process output</TabsTrigger>
           <TabsTrigger value="requests">Request logs</TabsTrigger>

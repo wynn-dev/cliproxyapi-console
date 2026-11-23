@@ -67,7 +67,7 @@ export function CacheBreaksCard() {
             {data.recent.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-medium text-muted-foreground">Latest</h3>
-                <ul className="divide-y rounded-lg border">
+                <ul className="divide-y border-y">
                   {data.recent.slice(0, 10).map((b) => (
                     <BreakRow key={`${b.sessionId}-${b.ts}`} b={b} name={name} />
                   ))}

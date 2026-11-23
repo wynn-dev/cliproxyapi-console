@@ -109,7 +109,7 @@ function Details({ r, labels }: { r: UsageRequest; labels: CredentialLabels }) {
                   <Link
                     to="/credentials"
                     search={{ account: account.name }}
-                    className="mt-1 inline-flex items-center gap-1 text-xs underline underline-offset-4 hover:text-foreground"
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-link hover:underline"
                   >
                     Open account <ArrowRightIcon className="size-3" />
                   </Link>

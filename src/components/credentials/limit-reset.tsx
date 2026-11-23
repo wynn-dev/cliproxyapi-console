@@ -51,7 +51,7 @@ export function LimitReset({
         : 'It resets the 5-hour limit now, once a week.'
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
+    <div className="flex items-center justify-between gap-4 border-y py-2.5">
       <div className="min-w-0 space-y-0.5">
         <div className="text-sm font-medium">{fable ? 'Fable reset' : 'Limit reset'}</div>
         <div className="text-xs text-muted-foreground">{[said, why].filter(Boolean).join(' ')}</div>

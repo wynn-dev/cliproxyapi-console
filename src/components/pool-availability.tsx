@@ -21,14 +21,13 @@ const REASONS: { state: Exclude<Availability, 'available'>; label: (n: number) =
   { state: 'cooling', label: (n) => `${n} cooling down after errors` },
 ]
 
-/** How many accounts per provider can take requests, and what to do when none can. */
-export function PoolAvailability({ running }: { running: boolean }) {
+function usePools(running: boolean) {
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const now = useTicker(running, 5_000)
   // Accounts turned off by hand aren't counted; which ones the console turned off is known once the reserve is in.
   const files = (credentials.data?.files ?? []).filter((f) => !turnedOff(f, reserveHold(f, reserve.data)))
-  if (!running || reserve.isPending || !files.length) return null
+  if (!running || reserve.isPending || !files.length) return undefined
 
   const byName = new Map(files.map((f) => [f.name, f]))
   const holdOf = (name: string) => {
@@ -36,28 +35,44 @@ export function PoolAvailability({ running }: { running: boolean }) {
     return hold && !hold.overridden ? hold : undefined
   }
   const pools = poolAvailability(files, holdOf, now).sort((a, b) => rank(a.provider) - rank(b.provider) || a.provider.localeCompare(b.provider))
-  const empty = pools.filter((p) => p.available === 0)
   // Fable held on every available Claude account: Fable requests fail while other models work.
   const claude = files.filter((f) => f.provider === 'claude' && availability(f, holdOf(f.name), now).state === 'available')
   const fable = claude.map((f) => reserve.data?.fable?.[f.name])
   const fableOut = claude.length > 0 && fable.every(Boolean)
   const fableBack = fableOut ? Math.min(...fable.map((h) => h!.until)) : 0
+  return { pools, reserve: reserve.data, fableOut, fableBack }
+}
 
+/** How many accounts per provider can take requests. */
+export function PoolSummary({ running }: { running: boolean }) {
+  const state = usePools(running)
+  if (!state) return null
+  return (
+    <ul className="space-y-0.5 text-[0.8rem]" aria-label="Accounts available">
+      {state.pools.map((p) => (
+        <li key={p.provider} className="flex items-center gap-2">
+          <StatusDot tone={p.available === 0 ? 'bad' : p.available < p.total ? 'warn' : 'good'} />
+          <span>{providerLabel(p.provider)}</span>
+          <span className="text-muted-foreground tabular">
+            {p.available} of {p.total} available
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** What to do when no account of a provider can take requests. */
+export function PoolAvailability({ running }: { running: boolean }) {
+  const state = usePools(running)
+  if (!state) return null
+  const { pools, reserve, fableOut, fableBack } = state
+  const empty = pools.filter((p) => p.available === 0)
+  if (!empty.length && !fableOut) return null
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm" aria-label="Accounts available">
-        {pools.map((p) => (
-          <span key={p.provider} className="inline-flex items-center gap-2">
-            <StatusDot tone={p.available === 0 ? 'bad' : p.available < p.total ? 'warn' : 'good'} />
-            <span className="font-medium">{providerLabel(p.provider)}</span>
-            <span className="text-muted-foreground tabular">
-              {p.available} of {p.total} available
-            </span>
-          </span>
-        ))}
-      </div>
       {empty.map((p) => (
-        <EmptyPool key={p.provider} pool={p} reserve={reserve.data} />
+        <EmptyPool key={p.provider} pool={p} reserve={reserve} />
       ))}
       {fableOut && (
         <Alert>

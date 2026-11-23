@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { CopyButton, PageHeader, StatusDot } from '@/components/common'
 import { ModelPicker, type ProxyModel } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
@@ -90,10 +90,14 @@ function Connect() {
       <PageHeader title="Connect" description="Point Claude Code, Codex or any other client at the proxy. Every command is complete: copy it and run it." />
 
       <Card>
+        <CardHeader>
+          <CardTitle>Address and key</CardTitle>
+          <CardDescription>Filled into every command below.</CardDescription>
+        </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
             <div className="min-w-0 space-y-1.5">
-              <div className="text-sm font-medium">Address</div>
+              <div className="text-xs text-muted-foreground">Address</div>
               <Select value={host} onValueChange={setHost} disabled={!status}>
                 <SelectTrigger className="w-full font-mono text-[13px]">
                   <SelectValue />
@@ -111,7 +115,7 @@ function Connect() {
                 {localOnly ? (
                   <>
                     The proxy only accepts connections from this machine. To use it from others, set its host to all interfaces in{' '}
-                    <Link to="/settings" search={{ section: 'server' }} className="text-foreground underline underline-offset-4">
+                    <Link to="/settings" search={{ section: 'server' }} className="text-link hover:underline">
                       Settings
                     </Link>
                     .
@@ -122,7 +126,7 @@ function Connect() {
               </p>
             </div>
             <div className="min-w-0 space-y-1.5">
-              <div className="text-sm font-medium">Client key</div>
+              <div className="text-xs text-muted-foreground">Client key</div>
               {!config.data ? (
                 <Skeleton className="h-8 w-full" />
               ) : keys.length ? (
@@ -155,8 +159,7 @@ function Connect() {
                 </Button>
               )}
               <p className="text-xs text-muted-foreground">
-                Filled into every command below.{' '}
-                <Link to="/keys" className="text-foreground underline underline-offset-4">
+                <Link to="/keys" className="text-link hover:underline">
                   Manage keys
                 </Link>
               </p>
@@ -166,36 +169,31 @@ function Connect() {
         </CardContent>
       </Card>
 
-      <Tabs value={tool} onValueChange={(v) => setSearch({ tool: v as ToolId })} className="gap-4">
-        <TabsList>
-          {TOOLS.map((t) => (
-            <TabsTrigger key={t.id} value={t.id} className="px-3">
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        <TabsContent value="claude-code">
-          <Card>
-            <CardContent>
+      <Card>
+        <Tabs value={tool} onValueChange={(v) => setSearch({ tool: v as ToolId })} orientation="vertical" className="contents">
+          <CardHeader>
+            <CardTitle>Set up a client</CardTitle>
+            <TabsList className="mt-2 -ml-2 h-auto! w-full flex-col items-stretch gap-0.5">
+              {TOOLS.map((t) => (
+                <TabsTrigger key={t.id} value={t.id}>
+                  {t.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </CardHeader>
+          <CardContent>
+            <TabsContent value="claude-code">
               <ClaudeCode origin={origin} clientKey={shown} shell={shell} setShell={setShell} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="codex">
-          <Card>
-            <CardContent>
+            </TabsContent>
+            <TabsContent value="codex">
               <Codex origin={origin} clientKey={shown} shell={shell} setShell={setShell} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="other">
-          <Card>
-            <CardContent>
+            </TabsContent>
+            <TabsContent value="other">
               <OtherClients origin={origin} clientKey={shown} />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </TabsContent>
+          </CardContent>
+        </Tabs>
+      </Card>
     </>
   )
 }
@@ -246,7 +244,7 @@ function Reachability({ origin, host, clientKey }: { origin: string; host: strin
   }
 
   return (
-    <div className="flex min-h-8 items-center gap-2 rounded-md border bg-muted/30 py-1 pr-1 pl-3 text-sm">
+    <div className="flex min-h-8 items-center gap-2 text-[0.84rem]">
       {!skip && check.isFetching ? <Spinner className="size-3.5" /> : <StatusDot tone={tone} />}
       <span className="min-w-0 flex-1 text-muted-foreground">{text}</span>
       {!skip && (
@@ -424,7 +422,7 @@ http_headers = { Authorization = "Bearer ${clientKey}" }
         description={
           <>
             Send any message. It shows up on the{' '}
-            <Link to="/usage" className="text-foreground underline underline-offset-4">
+            <Link to="/usage" className="text-link hover:underline">
               Usage
             </Link>{' '}
             page within a few seconds. Codex uses its default model; switch with <Code>/model</Code>.
@@ -519,8 +517,8 @@ function Field({ label, value }: { label: string; value: string }) {
 
 function Step({ n, title, description, children }: { n: number; title: string; description: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3">
-      <span className="flex size-6 items-center justify-center rounded-full border text-xs font-medium tabular">{n}</span>
+    <li className="grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3">
+      <span className="text-[0.84rem] leading-6 text-muted-foreground tabular">{n}</span>
       <div className="min-w-0 space-y-2.5">
         <div className="space-y-1">
           <div className="text-sm leading-6 font-medium">{title}</div>
@@ -536,7 +534,7 @@ const Code = ({ children }: { children: React.ReactNode }) => <code className="r
 
 function Snippet({ code, label }: { code: string; label: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-lg border bg-muted/40">
+    <div className="overflow-hidden rounded-md border bg-muted/40">
       <div className="flex items-center justify-between gap-2 border-b py-1 pr-1 pl-3 text-xs text-muted-foreground">
         <div className="min-w-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">{label}</div>
         <CopyButton value={code} />
@@ -556,7 +554,7 @@ function Choice<T extends string>({ value, onChange, options }: { value: T; onCh
           role="radio"
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
-          className="rounded-md px-2 py-1 font-medium transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-checked:bg-background aria-checked:text-foreground aria-checked:shadow-xs"
+          className="rounded-md px-2 py-1 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 aria-checked:bg-foreground/[0.06] aria-checked:text-foreground"
         >
           {o.label}
         </button>

@@ -55,19 +55,19 @@ function SettingsPage() {
 
   // Sections stay mounted while hidden so switching keeps unsaved edits.
   const panel = (id: SectionId, children: React.ReactNode) => (
-    <div role="tabpanel" id={`settings-${id}`} aria-labelledby={`settings-tab-${id}`} hidden={section !== id} className="space-y-6">
+    <div role="tabpanel" id={`settings-${id}`} aria-labelledby={`settings-tab-${id}`} hidden={section !== id}>
       {children}
     </div>
   )
 
   return (
     <>
-      <PageHeader title="Settings" description="Configure how CLIProxyAPI routes, retries, logs and listens. Changes apply without a restart unless noted." />
+      <PageHeader title="Settings" />
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <nav aria-label="Settings sections" className="-mx-1 shrink-0 overflow-x-auto px-1 lg:sticky lg:top-20 lg:mx-0 lg:w-52 lg:px-0">
-          <div role="tablist" aria-orientation="vertical" className="flex gap-1 lg:flex-col">
-            {SECTIONS.map(({ id, label, icon: Icon }) => (
+      <div className="flex flex-col gap-2">
+        <nav aria-label="Settings sections" className="-mx-4 overflow-x-auto border-b px-4 md:mx-0 md:px-0">
+          <div role="tablist" aria-orientation="horizontal" className="flex gap-5">
+            {SECTIONS.map(({ id, label }) => (
               <button
                 key={id}
                 id={`settings-tab-${id}`}
@@ -76,10 +76,9 @@ function SettingsPage() {
                 aria-controls={`settings-${id}`}
                 data-active={section === id}
                 onClick={() => navigate({ search: { section: id }, replace: true })}
-                className="flex shrink-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 data-[active=true]:bg-muted data-[active=true]:font-medium data-[active=true]:text-foreground"
+                className="flex shrink-0 items-center gap-1.5 pt-1 pb-2.5 text-left text-[0.84rem] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground data-[active=true]:text-foreground data-[active=true]:shadow-[inset_0_-1.5px_0_var(--foreground)]"
               >
-                <Icon className="size-4" />
-                <span className="flex-1">{label}</span>
+                <span>{label}</span>
                 {tabDirty(id) && (
                   <span className="size-1.5 rounded-full bg-warning" title="Unsaved changes">
                     <span className="sr-only">(unsaved changes)</span>

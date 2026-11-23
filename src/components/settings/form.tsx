@@ -31,25 +31,30 @@ export function SectionCard({
   footerNote?: React.ReactNode
 }) {
   return (
-    <section data-slot="settings-section" aria-label={title} className="space-y-4">
-      <header className="flex min-h-8 items-center justify-between gap-3">
+    <section
+      data-slot="settings-section"
+      aria-label={title}
+      className="grid gap-x-10 gap-y-3 border-t py-6 first:border-t-0 first:pt-2 @5xl/main:grid-cols-[10.5rem_minmax(0,1fr)]"
+    >
+      <header className="flex min-w-0 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <h2 className="text-base font-semibold">{title}</h2>
+          <h2 className="text-[0.9rem] font-semibold">{title}</h2>
           <Hint label={`About ${title}`}>{description}</Hint>
         </div>
-        <div className={cn('flex items-center gap-1.5 transition-opacity', !form.dirty && 'pointer-events-none opacity-0')} aria-hidden={!form.dirty}>
-          <UnsavedBadge className="max-sm:hidden" />
-          <Button variant="ghost" size="sm" disabled={!form.dirty || form.saving} onClick={form.reset}>
-            Reset
-          </Button>
-          <Button size="sm" disabled={!form.dirty || !form.valid || form.saving} onClick={onSave ?? (() => void form.save())}>
-            {form.saving && <Spinner />}
-            Save
-          </Button>
-        </div>
+        {footerNote && <p className="text-xs text-muted-foreground">{footerNote}</p>}
+        {form.dirty && (
+          <div className="flex items-center gap-1.5 pt-1">
+            <Button size="sm" disabled={!form.valid || form.saving} onClick={onSave ?? (() => void form.save())}>
+              {form.saving && <Spinner />}
+              Save
+            </Button>
+            <Button variant="ghost" size="sm" disabled={form.saving} onClick={form.reset}>
+              Reset
+            </Button>
+          </div>
+        )}
       </header>
-      {footerNote && <p className="-mt-2 text-xs text-muted-foreground">{footerNote}</p>}
-      {form.loaded ? <FieldGroup>{children}</FieldGroup> : <FormSkeleton />}
+      {form.loaded ? <FieldGroup className="gap-0 divide-y">{children}</FieldGroup> : <FormSkeleton />}
     </section>
   )
 }
@@ -85,7 +90,7 @@ const fieldId = (path: string) => `setting-${path.replaceAll('.', '-')}`
 function FieldLabelText({ form, path, label, description }: { form: SectionForm; path: string; label: React.ReactNode; description: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5">
-      <FieldLabel htmlFor={fieldId(path)}>
+      <FieldLabel htmlFor={fieldId(path)} className="font-normal">
         {label}
         {form.isDirty(path) && (
           <span className="size-1.5 rounded-full bg-warning" title="Modified">

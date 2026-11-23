@@ -8,9 +8,9 @@ import { accountName, credState, reserveHold, reserveNote, useAccountParam } fro
 import { ModelsDialog } from '@/components/credentials/models-dialog'
 import { CredentialStatus, SignInHint } from '@/components/credentials/status'
 import { AccountMeters, PoolMeter } from '@/components/limit-meter'
-import { Badge } from '@/components/ui/badge'
+import { PoolSummary } from '@/components/pool-availability'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
@@ -20,6 +20,7 @@ import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
 import type { Credential, LimitCheck, ReserveStatus } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 const PROVIDER_ORDER = ['claude', 'codex']
 
@@ -57,11 +58,16 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
     now,
   ).filter((p) => p.accounts > 1)
 
+  // One column per limit any account reports, in a fixed order.
+  const labels = new Set(accounts.flatMap((c) => limitWindows(c.provider, accountReadings(c.quota, stored.data?.[c.name]).reading, now).map((w) => w.label)))
+  const columns = [...COLUMN_ORDER.filter((l) => labels.has(l)), ...[...labels].filter((l) => !COLUMN_ORDER.includes(l))]
+  const grid = { '--cols': Math.max(columns.length, 1) } as React.CSSProperties
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Accounts</CardTitle>
-        <CardDescription>How much of each usage limit is left, as each provider last reported it. Select an account for details.</CardDescription>
+        <PoolSummary running={running} />
         <CardAction>
           <Button variant="ghost" size="sm" asChild>
             <Link to="/credentials">
@@ -69,6 +75,20 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
             </Link>
           </Button>
         </CardAction>
+        {config.data && accounts.length > 0 && (
+          <p className="mt-auto hidden pt-4 text-xs leading-relaxed text-muted-foreground @5xl/main:block">
+            <span className="inline-flex items-center gap-1.5 text-foreground">
+              {scattered && <StatusDot tone="warn" />}
+              {strategyLabel(routing.strategy)}
+              {routing.affinity && ', sticky'}
+            </span>
+            <br />
+            {scattered ? 'Conversations can move between accounts and lose their prompt cache. ' : ''}
+            <Link to="/settings" search={{ section: 'routing' }} className="text-link hover:underline">
+              {scattered ? 'Fix in Settings' : 'Routing settings'}
+            </Link>
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         {!running ? (
@@ -81,28 +101,42 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
         ) : accounts.length === 0 ? (
           <Empty>
             No accounts yet.{' '}
-            <Link to="/credentials" className="text-foreground underline underline-offset-4">
+            <Link to="/credentials" className="text-link hover:underline">
               Add one
             </Link>
           </Empty>
         ) : (
-          <>
+          <div style={grid}>
+            <div className={cn(ROW_GRID, 'border-b pb-2 text-xs text-muted-foreground max-md:hidden')}>
+              <span>Account</span>
+              {columns.map((l) => (
+                <span key={l}>{COLUMN_LABEL[l] ?? l}</span>
+              ))}
+            </div>
             {pools.length > 0 && (
-              <div className="grid items-start gap-x-8 gap-y-3 border-b pb-4 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">All accounts</div>
-                  <div className="text-sm text-muted-foreground">
-                    {pools.some((p) => p.label === 'Fable') ? 'Weekly and Fable limits' : 'Weekly limits'} added up, per provider
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {pools.map((p) => (
-                    <PoolMeter key={`${p.provider}:${p.label}`} pool={p} reserve={reserve.data?.limits[p.label === 'Fable' ? 'fable' : 'weekly']} now={now} />
-                  ))}
-                </div>
-              </div>
+              <ul className="border-b py-1.5">
+                {[...new Set(pools.map((p) => p.provider))].map((provider) => {
+                  const own = pools.filter((p) => p.provider === provider)
+                  return (
+                    <li key={provider} className={cn(ROW_GRID, 'py-2')}>
+                      <div className="min-w-0 text-[0.84rem]">
+                        <span className="font-medium">All {providerLabel(provider)}</span>
+                        <span className="text-muted-foreground"> · {own[0]!.accounts} accounts</span>
+                      </div>
+                      {columns.map((l) => {
+                        const p = own.find((x) => x.label === l)
+                        return p ? (
+                          <PoolMeter key={l} pool={p} reserve={reserve.data?.limits[p.label === 'Fable' ? 'fable' : 'weekly']} now={now} inline />
+                        ) : (
+                          <span key={l} aria-hidden className="max-md:hidden" />
+                        )
+                      })}
+                    </li>
+                  )
+                })}
+              </ul>
             )}
-            <ul className="divide-y">
+            <ul className="pt-1.5">
               {accounts.map((c) => (
                 <AccountRow
                   key={c.id}
@@ -110,29 +144,13 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
                   readings={accountReadings(c.quota, stored.data?.[c.name])}
                   check={checks.data?.enabled ? checks.data.accounts[c.name] : undefined}
                   reserve={reserve.data}
+                  columns={columns}
                   now={now}
                   onOpen={() => setOpen(c.name)}
                 />
               ))}
             </ul>
-            {config.data && (
-              <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-                <Badge variant="outline" className="gap-1.5 font-normal">
-                  {scattered && <StatusDot tone="warn" />}
-                  {strategyLabel(routing.strategy)}
-                  {routing.affinity && ' · sticky sessions'}
-                </Badge>
-                {scattered
-                  ? 'Conversations can move between accounts and lose their prompt cache.'
-                  : keepsCachesWarm(routing)
-                    ? 'One account is used until it runs out, and each conversation stays on its account.'
-                    : 'How requests are spread across accounts.'}
-                <Link to="/settings" search={{ section: 'routing' }} className="text-foreground underline underline-offset-4">
-                  {scattered ? 'Fix in Settings' : 'Routing settings'}
-                </Link>
-              </p>
-            )}
-          </>
+          </div>
         )}
       </CardContent>
       <CredentialSheet
@@ -146,8 +164,13 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   )
 }
 
+const COLUMN_ORDER = ['5h', 'Weekly', 'Fable']
+const COLUMN_LABEL: Record<string, string> = { '5h': '5-hour' }
+/** Account, then one cell per limit column; on phones each meter gets its own line. */
+const ROW_GRID = 'grid items-center gap-x-6 gap-y-1.5 md:grid-cols-[minmax(0,13rem)_repeat(var(--cols),minmax(0,1fr))]'
+
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{children}</div>
+  return <div className="py-6 text-sm text-muted-foreground">{children}</div>
 }
 
 function AccountRow({
@@ -155,6 +178,7 @@ function AccountRow({
   readings: { reading, older },
   check,
   reserve,
+  columns,
   now,
   onOpen,
 }: {
@@ -163,6 +187,7 @@ function AccountRow({
   /** The account's last limit check, while checks are on. */
   check?: LimitCheck
   reserve?: ReserveStatus
+  columns: string[]
   now: number
   onOpen: () => void
 }) {
@@ -177,15 +202,15 @@ function AccountRow({
   return (
     // The whole row opens the account panel, where everything the tooltips say is also spelled out for touch screens.
     <li
-      className="group -mx-2 grid cursor-pointer items-start gap-x-8 gap-y-3 rounded-lg px-2 py-4 transition-colors hover:bg-muted/40 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]"
+      className={cn(ROW_GRID, 'group -mx-2.5 cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-foreground/[0.035] dark:hover:bg-foreground/[0.05]')}
       onClick={onOpen}
     >
-      <div className="min-w-0 space-y-1">
-        <div className="flex min-w-0 items-center gap-1.5">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex min-w-0 items-baseline gap-2">
           <button
             type="button"
             aria-haspopup="dialog"
-            className="truncate rounded-sm text-left text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="truncate rounded-sm text-left text-[0.84rem] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={(e) => {
               e.stopPropagation()
               onOpen()
@@ -193,17 +218,12 @@ function AccountRow({
           >
             {accountName(c)}
           </button>
-          <Badge variant="secondary" className="h-4.5 px-1.5 text-[11px]">
-            {providerLabel(c.provider)}
-          </Badge>
-          {c.id_token?.plan_type && (
-            <Badge variant="outline" className="h-4.5 px-1.5 text-[11px] capitalize">
-              {c.id_token.plan_type}
-            </Badge>
-          )}
-          <ChevronRightIcon aria-hidden className="ml-auto size-4 shrink-0 text-muted-foreground/60 group-hover:text-muted-foreground lg:hidden" />
+          <span className="shrink-0 text-xs text-muted-foreground capitalize">
+            {[providerLabel(c.provider), c.id_token?.plan_type].filter(Boolean).join(' · ')}
+          </span>
+          <ChevronRightIcon aria-hidden className="ml-auto size-4 shrink-0 self-center text-muted-foreground/60 md:hidden" />
         </div>
-        <div className="text-sm text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           {credState(c) === 'active' ? (
             <span className="inline-flex items-center gap-2">
               <StatusDot tone="good" pulse={inUse} />
@@ -211,7 +231,7 @@ function AccountRow({
               {hold && reserve && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="cursor-default text-xs text-muted-foreground/80">· {hold.released ? 'released' : 'reserve overridden'}</span>
+                    <span className="cursor-default text-muted-foreground/80">· {hold.released ? 'released' : 'reserve overridden'}</span>
                   </TooltipTrigger>
                   <TooltipContent className="max-w-xs">{reserveNote(hold, reserve.limits)}</TooltipContent>
                 </Tooltip>
@@ -221,24 +241,16 @@ function AccountRow({
           ) : (
             <CredentialStatus credential={c} />
           )}
+          {checkFailed ? (
+            <span className="block truncate" title={check.error}>
+              Limit check failed: {check.error}
+            </span>
+          ) : (
+            checked && <span> · checked {fmtAgo(observedAt)}</span>
+          )}
         </div>
-        {checkFailed ? (
-          <div className="truncate text-xs text-muted-foreground" title={check.error}>
-            Limit check failed: {check.error}
-          </div>
-        ) : (
-          checked && <div className="text-xs text-muted-foreground">Limits checked {fmtAgo(observedAt)}</div>
-        )}
       </div>
-      <AccountMeters
-        account={c}
-        reading={reading}
-        older={older}
-        checkedAt={check?.okAt}
-        reserve={reserve}
-        now={now}
-        className="sm:grid-cols-3 xl:grid-cols-4"
-      />
+      <AccountMeters account={c} reading={reading} older={older} checkedAt={check?.okAt} reserve={reserve} now={now} columns={columns} />
     </li>
   )
 }

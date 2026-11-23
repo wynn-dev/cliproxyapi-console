@@ -16,6 +16,7 @@ import {
 import { Logo } from '@/components/auth-shell'
 import { StatusDot } from '@/components/common'
 import { ConsoleVersion } from '@/components/console-update'
+import { ThemeToggle } from '@/components/theme'
 import {
   Sidebar,
   SidebarContent,
@@ -81,22 +82,22 @@ export function AppSidebar() {
   const p = state ? PROCESS_LABEL[state] : undefined
 
   return (
-    <Sidebar variant="inset" collapsible="icon">
+    <Sidebar collapsible="offcanvas">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/" onClick={close}>
-                <Logo className="size-8 shrink-0" />
-                <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate font-semibold">CPA Console</span>
-                  <span className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-                    {p && <StatusDot tone={p.tone} pulse={state === 'starting'} />}
-                    {p ? `${p.label} · ${status?.cpa.version ?? 'not installed'}` : 'Connecting…'}
-                  </span>
-                </div>
+            <div className="flex h-10 items-center gap-2.5 px-2">
+              <Link to="/" onClick={close} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+                <Logo className="size-5 shrink-0" />
+                <span className="truncate text-[0.9rem] font-semibold tracking-tight text-foreground">CPA Console</span>
               </Link>
-            </SidebarMenuButton>
+              {p && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground" title={`CLIProxyAPI ${p.label.toLowerCase()} · ${status?.cpa.version ?? 'not installed'}`}>
+                  <StatusDot tone={p.tone} pulse={state === 'starting'} />
+                  <span className="tabular">{status?.cpa.version ?? p.label}</span>
+                </span>
+              )}
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -140,8 +141,9 @@ export function AppSidebar() {
               <span>Sign out</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-          <SidebarMenuItem>
+          <SidebarMenuItem className="flex items-center justify-between">
             <ConsoleVersion version={status?.consoleVersion} />
+            <ThemeToggle />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

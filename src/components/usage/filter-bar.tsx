@@ -106,10 +106,10 @@ export function UsageFilterBar({ facets, labels }: { facets?: UsageFacets; label
       {hasFilters(search) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {FILTERS.filter((f) => search[f.key]).map((f) => (
-            <span key={f.key} className="inline-flex h-6 max-w-72 items-center gap-1 rounded-full border bg-muted/50 pr-0.5 pl-2.5 text-xs">
+            <span key={f.key} className="inline-flex h-6 max-w-72 items-center gap-1 rounded-md border bg-muted/50 pr-0.5 pl-2 text-xs">
               <span className="text-muted-foreground">{f.label}</span>
               <span className="truncate font-medium">{chipText(f.key, search[f.key]!)}</span>
-              <Button variant="ghost" size="icon-xs" className="size-5 rounded-full" aria-label={`Remove ${f.label} filter`} onClick={() => set({ [f.key]: undefined })}>
+              <Button variant="ghost" size="icon-xs" className="size-5 rounded-sm" aria-label={`Remove ${f.label} filter`} onClick={() => set({ [f.key]: undefined })}>
                 <XIcon />
               </Button>
             </span>

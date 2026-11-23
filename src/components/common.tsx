@@ -2,7 +2,6 @@ import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, InfoIcon } from 'lucide-react
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -14,7 +13,7 @@ export function PageHeader({ title, description, actions }: { title: string; des
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.02em]">{title}</h1>
         {description && <p className="text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -66,30 +65,26 @@ export function SecretText({ value, className }: { value: string; className?: st
   )
 }
 
+/** A figure: a small label over a large number, with a line of context under it. No box. */
 export function StatCard({
   label,
   value,
   hint,
-  icon: Icon,
   loading,
 }: {
   label: string
   value: React.ReactNode
   hint?: React.ReactNode
+  /** Kept for callers; figures carry no icon. */
   icon?: React.ComponentType<{ className?: string }>
   loading?: boolean
 }) {
   return (
-    <Card className="gap-0 py-4">
-      <CardContent className="space-y-1.5 px-4">
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          {label}
-          {Icon && <Icon className="size-4" />}
-        </div>
-        {loading ? <Skeleton className="h-8 w-24" /> : <div className="text-2xl font-semibold tracking-tight">{value}</div>}
-        {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
-      </CardContent>
-    </Card>
+    <div className="min-w-0 space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      {loading ? <Skeleton className="h-7 w-20" /> : <div className="text-[1.45rem] leading-tight font-semibold tracking-[-0.02em] tabular">{value}</div>}
+      {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
+    </div>
   )
 }
 

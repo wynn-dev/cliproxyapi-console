@@ -62,7 +62,7 @@ export function OrderSection({ onDirty }: { onDirty: DirtyReporter }) {
         </Alert>
       )}
       {data?.active && lines.size > 0 && (
-        <dl className="space-y-1.5 rounded-lg border px-3 py-2.5 text-sm">
+        <dl className="space-y-1 py-3 text-[0.8rem]">
           {[...lines].map(([provider, accounts]) => (
             <div key={provider} className="flex gap-3">
               <dt className="w-14 shrink-0 text-muted-foreground">{providerLabel(provider)}</dt>

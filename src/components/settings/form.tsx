@@ -140,12 +140,12 @@ export function NumberField({ form, path, label, description, unit, disabled }: 
     />
   )
   return (
-    <Field orientation="responsive" data-invalid={!!err || undefined} data-disabled={disabled || undefined}>
+    <Field orientation="horizontal" data-invalid={!!err || undefined} data-disabled={disabled || undefined}>
       <FieldContent>
         <FieldLabelText form={form} path={path} label={label} description={description} />
         <FieldError>{err}</FieldError>
       </FieldContent>
-      <InputGroup className="@md/field-group:w-36!">
+      <InputGroup className="w-24! shrink-0 @md/field-group:w-36!">
         {input}
         {unit && (
           <InputGroupAddon align="inline-end">

@@ -5,7 +5,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { paths } from './env.ts'
 import { readState, updateState } from './state.ts'
-import { db, usageSummary, withUsageRows } from './usage.ts'
+import { conversations, db, usageReady, usageSummary, withUsageRows } from './usage.ts'
 
 /** Share card: a summary of a time range and the PNG snapshots the browser renders of it. Mounted behind auth. */
 export const share = new Hono()
@@ -69,22 +69,8 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
       .all() as { name: string; tokens: number }[],
     agents: db.prepare("SELECT user_agent AS ua, TOTAL(total) AS tokens FROM usage_rows WHERE user_agent != '' GROUP BY 1").all() as { ua: string; tokens: number }[],
   }))
-  // Conversations: CPA's session ids, one row each. Requests are client requests, not attempts; a
-  // Codex websocket session keeps one request_id for all its turns, so its successes count instead.
-  const conversations = db
-    .prepare(
-      `SELECT MAX(COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)), TOTAL(failed = 0)) AS requests, TOTAL(is_compaction) AS compactions,
-        TOTAL(total_tokens) AS tokens, MAX(ts) - MIN(ts) AS ms
-       FROM requests WHERE ts >= ? AND ts < ? AND session_id != '' GROUP BY session_id`,
-    )
-    .all(from, to) as { requests: number; compactions: number; tokens: number; ms: number }[]
-  const sessions = { count: conversations.length, requests: 0, compactions: 0, longest: null as { requests: number; tokens: number; ms: number } | null }
-  for (const c of conversations) {
-    sessions.requests += c.requests
-    sessions.compactions += c.compactions
-    const l = sessions.longest
-    if (!l || c.requests > l.requests || (c.requests === l.requests && c.tokens > l.tokens)) sessions.longest = { requests: c.requests, tokens: c.tokens, ms: c.ms }
-  }
+  // Conversations: CPA's session ids. Requests are client requests, not attempts.
+  const sessions = conversations(from, to)
   const clients = new Map<string, number>()
   for (const a of agents) {
     const name = clientName(a.ua)
@@ -138,11 +124,12 @@ export function shareMonths(tzOffsetMin: number) {
   return months
 }
 
-share.get('/summary', (c) => {
+share.get('/summary', async (c) => {
   const q = c.req.query()
   const to = q.to ? Number(q.to) : Date.now()
   const from = q.from ? Number(q.from) : to - 7 * 86_400_000
   if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return c.json({ error: 'from and to must be times in ms, from before to' }, 400)
+  await usageReady()
   return c.json(shareSummary(from, to, Number(q.tz) || 0))
 })
 

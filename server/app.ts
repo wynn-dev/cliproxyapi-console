@@ -25,7 +25,7 @@ import { signInResult, signInWarnings, watchSignIn } from './sign-in.ts'
 import { readState, updateState } from './state.ts'
 import { supervisor } from './supervisor.ts'
 import { networkAddresses } from './urls.ts'
-import { clearUsage, collector, type UsageFilter, usageFacets, usageRequests, usageSummary } from './usage.ts'
+import { clearUsage, collector, type UsageFilter, usageFacets, usageReady, usageRequests, usageSummary } from './usage.ts'
 
 const pkg = JSON.parse(fs.readFileSync(path.join(paths.root, 'package.json'), 'utf8')) as { version: string }
 
@@ -461,14 +461,18 @@ function usageFilter(c: Context): UsageFilter {
   }
 }
 
-app.get('/console/api/usage/summary', (c) => c.json(usageSummary(usageFilter(c), Number(c.req.query('tz') ?? 0))))
+app.get('/console/api/usage/summary', async (c) => {
+  await usageReady()
+  return c.json(usageSummary(usageFilter(c), Number(c.req.query('tz') ?? 0)))
+})
 app.get('/console/api/usage/requests', (c) => {
   // `before` is the last row's "ts:id": turned-away requests sit between attempts by time, not id.
   const [ts, id] = (c.req.query('before') ?? '').split(':').map(Number)
   const before = Number.isFinite(ts) && Number.isFinite(id) ? { ts, id } : undefined
   return c.json(usageRequests(usageFilter(c), Math.min(Number(c.req.query('limit') ?? 100), 500), before))
 })
-app.get('/console/api/usage/facets', (c) => {
+app.get('/console/api/usage/facets', async (c) => {
+  await usageReady()
   const f = usageFilter(c)
   return c.json(usageFacets(f.from, f.to))
 })

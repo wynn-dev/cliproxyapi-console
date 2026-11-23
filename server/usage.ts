@@ -478,14 +478,44 @@ db.exec(`
   END;
 `)
 
-// Version 2 adds the rollup: every slot with history starts dirty. Only the slots are listed here,
-// which reads the ts indexes; scheduleRollUp sums them a few hours at a time, so the first start
-// after an update never holds the database or the event loop for long.
+/**
+ * Each conversation (CPA's session id) summed whole, for the share card: its first and last
+ * request, client requests, compactions and tokens. Kept like the rollup: triggers mark the sessions
+ * a write touches dirty and sumSessions sums them again. No index on the times: a range reads most
+ * of this small table, and scanning it is many times faster than following an index into it.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS usage_sessions (
+    session_id TEXT PRIMARY KEY,
+    first_ts INTEGER NOT NULL,
+    last_ts INTEGER NOT NULL,
+    requests INTEGER NOT NULL,
+    compactions INTEGER NOT NULL,
+    tokens INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS usage_sessions_dirty (session_id TEXT PRIMARY KEY);
+
+  CREATE TRIGGER IF NOT EXISTS requests_sessions_insert AFTER INSERT ON requests WHEN NEW.session_id != '' BEGIN
+    INSERT OR IGNORE INTO usage_sessions_dirty VALUES (NEW.session_id);
+  END;
+  CREATE TRIGGER IF NOT EXISTS requests_sessions_update AFTER UPDATE ON requests BEGIN
+    INSERT OR IGNORE INTO usage_sessions_dirty SELECT OLD.session_id WHERE OLD.session_id != '';
+    INSERT OR IGNORE INTO usage_sessions_dirty SELECT NEW.session_id WHERE NEW.session_id != '';
+  END;
+  CREATE TRIGGER IF NOT EXISTS requests_sessions_delete AFTER DELETE ON requests WHEN OLD.session_id != '' BEGIN
+    INSERT OR IGNORE INTO usage_sessions_dirty VALUES (OLD.session_id);
+  END;
+`)
+
+// Version 2 adds the rollup and session sums: every slot and session with history starts dirty.
+// Only those are listed here, which reads the ts and session indexes; scheduleRollUp sums them a
+// little at a time, so the first start after an update never holds the database or the event loop for long.
 if ((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version < 2) {
   db.exec(`
     BEGIN;
     INSERT OR IGNORE INTO usage_rollup_dirty SELECT DISTINCT ts - ts % ${SLOT} FROM requests;
     INSERT OR IGNORE INTO usage_rollup_dirty SELECT DISTINCT ts - ts % ${SLOT} FROM turned_away;
+    INSERT OR IGNORE INTO usage_sessions_dirty SELECT DISTINCT session_id FROM requests WHERE session_id != '';
     PRAGMA user_version = 2;
     COMMIT;
   `)
@@ -539,24 +569,75 @@ function rollUp(from: number, to: number, budgetMs = Infinity) {
   }
 }
 
-let rolling = false
 /**
- * Rolls up every dirty slot, about 20 ms of them per turn of the event loop so requests are served
- * in between. A burst of traffic can put over 10,000 attempts in one slot, so a count of slots
- * would not bound it.
+ * A session's sums over [lo, hi) (named parameters). A Codex websocket session keeps one request_id
+ * for all its turns, so its successes count as requests when there are more of them.
+ */
+const sessionSums = (lo: string, hi: string) => `
+  SELECT session_id, MIN(ts) AS first_ts, MAX(ts) AS last_ts,
+    MAX(COUNT(DISTINCT COALESCE(NULLIF(request_id, ''), '#' || id)), TOTAL(failed = 0)) AS requests,
+    TOTAL(is_compaction) AS compactions, TOTAL(total_tokens) AS tokens
+  FROM requests WHERE session_id = $session AND session_id != '' AND ts >= ${lo} AND ts < ${hi} GROUP BY session_id`
+const dirtySessions = db.prepare('SELECT session_id FROM usage_sessions_dirty LIMIT 256')
+const clearSession = db.prepare('DELETE FROM usage_sessions WHERE session_id = ?')
+const fillSession = db.prepare(`INSERT INTO usage_sessions ${sessionSums('$from', '$to')}`)
+const cleanSession = db.prepare('DELETE FROM usage_sessions_dirty WHERE session_id = ?')
+
+/** Sums the dirty sessions again, stopping after the one that passes `budgetMs`. Returns whether any are left. */
+function sumSessions(budgetMs = Infinity) {
+  const start = performance.now()
+  for (;;) {
+    const ids = (dirtySessions.all() as { session_id: string }[]).map((r) => r.session_id)
+    if (!ids.length) return false
+    db.exec('BEGIN')
+    try {
+      for (const id of ids) {
+        clearSession.run(id)
+        fillSession.run({ session: id, from: 0, to: Number.MAX_SAFE_INTEGER })
+        cleanSession.run(id)
+        if (performance.now() - start > budgetMs) break
+      }
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
+    if (performance.now() - start > budgetMs) return true
+  }
+}
+
+let rolling = false
+const waiting: (() => void)[] = []
+/**
+ * Rolls up every dirty slot and session, about 20 ms of them per turn of the event loop so requests
+ * are served in between. A burst of traffic can put over 10,000 attempts in one slot, so a count of
+ * slots would not bound it.
  */
 function scheduleRollUp() {
   if (rolling) return
   rolling = true
   const step = () => {
     try {
-      if (rollUp(0, Number.MAX_SAFE_INTEGER, 20)) return void setImmediate(step)
+      if (rollUp(0, Number.MAX_SAFE_INTEGER, 20) || sumSessions(20)) return void setImmediate(step)
     } catch (err) {
       console.error(`Usage rollup failed: ${err instanceof Error ? err.message : err}`)
     }
     rolling = false
+    for (const resolve of waiting.splice(0)) resolve()
   }
   setImmediate(step)
+}
+
+const anyDirty = db.prepare('SELECT EXISTS (SELECT 1 FROM usage_rollup_dirty) OR EXISTS (SELECT 1 FROM usage_sessions_dirty) AS dirty')
+/**
+ * Settles once the background job has summed every dirty slot and session. HTTP reads await it, so
+ * a summary asked for during the catch-up after an update waits for it instead of doing the
+ * catch-up in one go and holding up every other request.
+ */
+export function usageReady() {
+  if (!rolling && !(anyDirty.get() as { dirty: number }).dirty) return Promise.resolve()
+  scheduleRollUp()
+  return new Promise<void>((resolve) => waiting.push(resolve))
 }
 
 /**
@@ -579,6 +660,7 @@ export function withUsageRows<T>(f: UsageFilter, read: () => T, ms = SLOT): T {
   const b = Math.floor(f.to / SLOT) * SLOT
   let parts = [rawRows(ms)]
   if (ms === SLOT && a < b) {
+    // Only what was written since usageReady settled, unless the caller skipped it.
     rollUp(a, b)
     Object.assign(params, { a, b })
     parts = [`SELECT ${ROLLUP_COLUMNS} FROM usage_rollup WHERE slot >= $a AND slot < $b`]
@@ -599,11 +681,14 @@ export function withUsageRows<T>(f: UsageFilter, read: () => T, ms = SLOT): T {
   }
 }
 
-/** Metrics over rows of temp.usage_rows. */
-const METRICS = `
-  TOTAL(requests) AS requests,
-  TOTAL(failed) AS failed,
-  TOTAL(recovered) AS recovered,
+/**
+ * Metrics over rows of temp.usage_rows. Per attempt, a request is an attempt, failed when it did:
+ * for one credential, which may have served only some attempts of a client request.
+ */
+const metrics = (perAttempt: boolean) => `
+  TOTAL(${perAttempt ? 'attempts' : 'requests'}) AS requests,
+  TOTAL(${perAttempt ? 'failed_attempts' : 'failed'}) AS failed,
+  TOTAL(${perAttempt ? 0 : 'recovered'}) AS recovered,
   TOTAL(turned_away) AS turnedAway,
   TOTAL(attempts) AS attempts,
   TOTAL(failed_attempts) AS failedAttempts,
@@ -618,7 +703,7 @@ const METRICS = `
   TOTAL(value) AS value,
   TOTAL(CASE WHEN value IS NULL THEN input + output END) AS unpricedTokens`
 
-/** A row of METRICS; `key` in breakdowns. */
+/** A row of metrics(); `key` in breakdowns. */
 export interface Metrics {
   key?: string
   requests: number
@@ -654,15 +739,19 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
   const bucket = BUCKETS.find((b) => (f.to - from) / b <= 120) ?? WEEK
   // Align day buckets to the viewer's local midnight, and weeks to Monday (the epoch was a Thursday).
   const shift = -tzOffsetMin * 60_000 + (bucket === WEEK ? 3 * 86_400_000 : 0)
+  // Filtered to one credential, requests are its attempts, as in byCredential.
+  const perAttempt = !!f.authIndex
+  const sums = metrics(perAttempt)
+  const [requests, failed] = perAttempt ? ['attempts', 'failed_attempts'] : ['requests', 'failed']
   return withUsageRows(f, () => {
     const totals = {
-      ...(db.prepare(`SELECT ${METRICS} FROM usage_rows`).get() as unknown as Metrics),
+      ...(db.prepare(`SELECT ${sums} FROM usage_rows`).get() as unknown as Metrics),
       unpricedModels: (db.prepare('SELECT DISTINCT model FROM usage_rows WHERE value IS NULL AND input + output > 0 ORDER BY 1').all() as { model: string }[]).map((r) => r.model),
     }
 
     const rows = db
       .prepare(
-        `SELECT ((slot + ?) / ?) * ? - ? AS t, TOTAL(requests) AS requests, TOTAL(failed) AS failed, TOTAL(turned_away) AS turnedAway,
+        `SELECT ((slot + ?) / ?) * ? - ? AS t, TOTAL(${requests}) AS requests, TOTAL(${failed}) AS failed, TOTAL(turned_away) AS turnedAway,
           TOTAL(input) AS input, TOTAL(output) AS output, TOTAL(cached) AS cached, TOTAL(cache_write) AS cacheWrite, TOTAL(total) AS total,
           TOTAL(latency) / TOTAL(attempts) AS avgLatency
          FROM usage_rows GROUP BY t ORDER BY t`,
@@ -677,20 +766,45 @@ export function usageSummary(f: UsageFilter, tzOffsetMin: number) {
     }
 
     const group = (col: string) =>
-      db.prepare(`SELECT ${col} AS key, ${METRICS} FROM usage_rows GROUP BY 1 ORDER BY TOTAL(requests) DESC LIMIT 50`).all() as unknown as (Metrics & { key: string })[]
+      db.prepare(`SELECT ${col} AS key, ${sums} FROM usage_rows GROUP BY 1 ORDER BY TOTAL(${requests}) DESC LIMIT 50`).all() as unknown as (Metrics & { key: string })[]
     // Attempts, so an account shows the attempts that failed on it. Turned-away requests never reached one.
     const byCredential = db
-      .prepare(
-        `SELECT auth_index AS key, TOTAL(attempts) AS requests, TOTAL(failed_attempts) AS failed, 0 AS recovered, 0 AS turnedAway,
-          TOTAL(attempts) AS attempts, TOTAL(failed_attempts) AS failedAttempts, TOTAL(input) AS input, TOTAL(output) AS output,
-          TOTAL(reasoning) AS reasoning, TOTAL(cached) AS cached, TOTAL(cache_write) AS cacheWrite, TOTAL(total) AS total,
-          TOTAL(latency) / TOTAL(attempts) AS avgLatency, TOTAL(ttft) / TOTAL(ttft_count) AS avgTtft, TOTAL(value) AS value,
-          TOTAL(CASE WHEN value IS NULL THEN input + output END) AS unpricedTokens
-         FROM usage_rows WHERE away = 0 GROUP BY 1 ORDER BY TOTAL(attempts) DESC LIMIT 50`,
-      )
+      .prepare(`SELECT auth_index AS key, ${metrics(true)} FROM usage_rows WHERE away = 0 GROUP BY 1 ORDER BY TOTAL(attempts) DESC LIMIT 50`)
       .all() as unknown as (Metrics & { key: string })[]
     return { bucketMs: bucket, totals, series, byModel: group('model'), byProvider: group('provider'), byCredential, byApiKey: group('api_key') }
   }, Math.min(bucket, SLOT))
+}
+
+/**
+ * Conversations with a request in [from, to): how many, their client requests and compactions, and
+ * the one with the most requests (then tokens), each counting only its requests in the range.
+ * Sessions wholly inside come from usage_sessions; the few that cross an end are summed from their requests.
+ */
+export function conversations(from: number, to: number) {
+  sumSessions()
+  const range = { from, to }
+  const inside = db
+    .prepare('SELECT COUNT(*) AS count, TOTAL(requests) AS requests, TOTAL(compactions) AS compactions FROM usage_sessions WHERE first_ts >= $from AND last_ts < $to')
+    .get(range) as { count: number; requests: number; compactions: number }
+  type Session = { id: string; requests: number; tokens: number; ms: number }
+  const pick = 'session_id AS id, requests, tokens, last_ts - first_ts AS ms'
+  const candidates = db
+    .prepare(`SELECT ${pick} FROM usage_sessions WHERE first_ts >= $from AND last_ts < $to ORDER BY requests DESC, tokens DESC, session_id LIMIT 1`)
+    .all(range) as Session[]
+  const crossing = db.prepare(`SELECT session_id FROM usage_sessions WHERE last_ts >= $from AND first_ts < $to AND (first_ts < $from OR last_ts >= $to)`).all(range) as {
+    session_id: string
+  }[]
+  const partial = db.prepare(`SELECT ${pick}, compactions FROM (${sessionSums('$from', '$to')})`)
+  for (const { session_id } of crossing) {
+    const s = partial.get({ session: session_id, from, to }) as (Session & { compactions: number }) | undefined
+    if (!s) continue
+    candidates.push(s)
+    inside.count++
+    inside.requests += s.requests
+    inside.compactions += s.compactions
+  }
+  const longest = candidates.sort((a, b) => b.requests - a.requests || b.tokens - a.tokens || (a.id < b.id ? -1 : 1))[0]
+  return { ...inside, longest: longest ? { requests: longest.requests, tokens: longest.tokens, ms: longest.ms } : null }
 }
 
 /** Newest first. Attempts and turned-away requests (negative ids) share one list, paged by (ts, id). */
@@ -777,5 +891,6 @@ export function apiKeySpend(authIndex: string, since: { day: number; week: numbe
 }
 
 export function clearUsage() {
-  db.exec('DELETE FROM requests; DELETE FROM turned_away; DELETE FROM usage_rollup; DELETE FROM usage_rollup_dirty')
+  db.exec(`DELETE FROM requests; DELETE FROM turned_away; DELETE FROM usage_rollup; DELETE FROM usage_rollup_dirty;
+    DELETE FROM usage_sessions; DELETE FROM usage_sessions_dirty`)
 }

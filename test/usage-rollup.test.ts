@@ -62,6 +62,22 @@ describe('usage rollup', () => {
     )
   })
 
+  test('filtered to a credential, requests are its attempts', () => {
+    for (let i = 0; i < 5; i++) {
+      add({ ts: T0 + i * 60_000, id: `f${i}`, failed: true, auth: 'a' })
+      add({ ts: T0 + i * 60_000 + 1000, id: `f${i}`, auth: 'b' })
+    }
+    const a = summary(T0, T0 + 12 * HOUR, { authIndex: 'a' })
+    const b = summary(T0, T0 + 12 * HOUR, { authIndex: 'b' })
+    assert.deepEqual(pick(a.totals), { requests: 5, failed: 5, recovered: 0, attempts: 5, failedAttempts: 5, turnedAway: 0, input: 50, output: 25 })
+    assert.deepEqual(pick(b.totals), { requests: 5, failed: 0, recovered: 0, attempts: 5, failedAttempts: 0, turnedAway: 0, input: 50, output: 25 })
+    assert.equal(b.series.reduce((n, p) => n + p.requests, 0), 5)
+    assert.deepEqual(
+      b.byModel.map((m) => [m.key, m.requests, m.failed]),
+      [['m', 5, 0]],
+    )
+  })
+
   test('a success that arrives later turns an already summed failure into a recovery', () => {
     add({ ts: T0 + 1000, id: 'r1', failed: true })
     assert.deepEqual(pick(summary(T0, T0 + 12 * HOUR).totals), { requests: 1, failed: 1, recovered: 0, attempts: 1, failedAttempts: 1, turnedAway: 0, input: 10, output: 5 })

@@ -76,7 +76,7 @@ function SettingsPage() {
                 aria-controls={`settings-${id}`}
                 data-active={section === id}
                 onClick={() => navigate({ search: { section: id }, replace: true })}
-                className="flex shrink-0 items-center gap-1.5 pt-1 pb-2.5 text-left text-[0.84rem] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground data-[active=true]:text-foreground data-[active=true]:shadow-[inset_0_-1.5px_0_var(--foreground)]"
+                className="-mx-1 flex shrink-0 items-center gap-1.5 px-1 pt-1 pb-2.5 text-left text-[0.84rem] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:rounded-sm focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[active=true]:text-foreground data-[active=true]:shadow-[inset_0_-1.5px_0_var(--foreground)]"
               >
                 <span>{label}</span>
                 {tabDirty(id) && (

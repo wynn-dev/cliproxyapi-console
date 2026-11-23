@@ -59,6 +59,7 @@ function UsagePage() {
     <>
       <PageHeader
         title="Usage"
+        description="Every request that went through the proxy, kept by this console. A request counts once, however many accounts it tried."
         actions={
           <>
             <CollectorHealth />

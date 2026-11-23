@@ -60,6 +60,7 @@ function Overview() {
     <>
       <PageHeader
         title="Overview"
+        description="Health of your CLIProxyAPI instance and the last 24 hours of traffic."
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link to="/connect">
@@ -95,7 +96,7 @@ function Overview() {
                 label="Tokens"
                 loading={!usage.data}
                 value={fmtCompact(t?.total)}
-                hint={t?.total ? `${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
+                hint={t?.total ? `${fmtCompact(t.input)} in · ${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
               />
               <StatCard label="Avg latency" loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
             </div>

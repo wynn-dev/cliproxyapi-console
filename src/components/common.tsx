@@ -84,7 +84,7 @@ export function StatCard({
     <div className="min-w-0 space-y-1">
       <div className="text-xs text-muted-foreground">{label}</div>
       {loading ? <Skeleton className="h-7 w-20" /> : <div className="text-[1.45rem] leading-tight font-semibold tracking-[-0.02em] tabular">{value}</div>}
-      {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
+      {hint && <div className="line-clamp-2 text-xs text-muted-foreground">{hint}</div>}
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 export function PageHeader({ title, description, actions }: { title: string; description?: React.ReactNode; actions?: React.ReactNode }) {
   return (
-    <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+    <div className={cn('flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2', !actions && 'max-md:hidden')}>
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h1 className="text-[15px] font-semibold tracking-[-0.01em] max-md:sr-only">{title}</h1>
         {description && <p className="text-xs text-muted-foreground">{description}</p>}

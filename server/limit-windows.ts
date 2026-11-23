@@ -1,7 +1,8 @@
 /**
  * Usage limits per account, read from the rate-limit headers CPA last saw for it
- * (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex). Shared by the server (the
- * account reserve) and the SPA, so it imports nothing.
+ * (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex), or for Antigravity from the
+ * console's own quota reading (`antigravity-<family>-*`, see limit-checks.ts). Shared by the server
+ * (the account reserve) and the SPA, so it imports nothing.
  */
 
 export interface LimitReading {
@@ -31,6 +32,12 @@ const num = (v: string | undefined) => {
 export type ReserveWindow = '5h' | 'weekly'
 /** The windows the account reserve covers, by the label limitWindows gives them. Model-scoped ones (Fable) are left to CPA. */
 export const RESERVE_WINDOWS: Partial<Record<string, ReserveWindow>> = { '5h': '5h', Weekly: 'weekly' }
+
+/**
+ * The model families an Antigravity account has a quota for, by the first part of their model ids,
+ * with their labels. Each family is one limit, as Antigravity groups them.
+ */
+export const ANTIGRAVITY_FAMILIES: Record<string, string> = { gemini: 'Gemini', claude: 'Claude', gpt: 'GPT-OSS' }
 
 const CLAUDE_LABELS: Record<string, string> = { '5h': '5h', '7d': 'Weekly', '7d_oi': 'Fable' }
 
@@ -92,6 +99,13 @@ export function limitWindows(provider: string, reading: LimitReading | undefined
         used: used / 100,
         resetsAt: resetAt ? resetAt * 1000 : resetAfter !== undefined ? observedAt + resetAfter * 1000 : undefined,
       })
+    }
+  } else if (provider === 'antigravity') {
+    for (const [family, label] of Object.entries(ANTIGRAVITY_FAMILIES)) {
+      const left = num(s[`antigravity-${family}-remaining`])
+      if (left === undefined) continue
+      const reset = num(s[`antigravity-${family}-reset`])
+      add({ id: family, label, used: 1 - left, resetsAt: reset ? reset * 1000 : undefined })
     }
   }
   return out

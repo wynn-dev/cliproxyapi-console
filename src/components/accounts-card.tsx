@@ -21,7 +21,7 @@ import { queries } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
 import type { Credential, LimitCheck, ReserveStatus } from '@/lib/types'
 
-const PROVIDER_ORDER = ['claude', 'codex']
+const PROVIDER_ORDER = ['claude', 'codex', 'antigravity']
 
 /** Providers first, then the order fill-first routing tries accounts in: priority, then file name. */
 function byRoutingOrder(a: Credential, b: Credential) {
@@ -50,7 +50,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
           const hold = reserve.data.accounts[c.name]
           if (!PROVIDER_ORDER.includes(c.provider) || (c.disabled && (!hold || hold.reason === 'signed-out'))) return []
           const weeklyHold = hold && (hold.windows as string[]).some((w) => w === 'weekly' || w === 'Weekly') ? hold.until : undefined
-          const holds = { Weekly: weeklyHold, Fable: reserve.data.fable?.[c.name]?.until }
+          const holds = { Weekly: weeklyHold, Fable: reserve.data.fable?.[c.name]?.until, ...reserve.data.antigravity?.[c.name] }
           return [{ provider: c.provider, ...accountReadings(c.quota, stored.data?.[c.name]), holds }]
         })
       : [],
@@ -92,7 +92,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
                 <div className="space-y-1">
                   <div className="text-sm font-medium">All accounts</div>
                   <div className="text-sm text-muted-foreground">
-                    {pools.some((p) => p.label === 'Fable') ? 'Weekly and Fable limits' : 'Weekly limits'} added up, per provider
+                    {[...new Set(pools.map((p) => p.label))].join(', ').replace(/, ([^,]*)$/, ' and $1')} limits added up, per provider
                   </div>
                 </div>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">

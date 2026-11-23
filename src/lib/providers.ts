@@ -2,6 +2,7 @@
 export const OAUTH_PROVIDERS = [
   { id: 'claude', name: 'Claude', description: 'Anthropic Claude subscription' },
   { id: 'codex', name: 'Codex', description: 'ChatGPT / OpenAI Codex' },
+  { id: 'antigravity', name: 'Antigravity', description: 'Google Gemini subscription, signed in as the Antigravity app' },
 ] as const
 
 /** API-key provider sections under `api-keys` in the v8 config. */
@@ -20,6 +21,7 @@ const LABELS: Record<string, string> = {
   claude: 'Claude',
   anthropic: 'Claude',
   codex: 'Codex',
+  antigravity: 'Antigravity',
   gemini: 'Gemini',
   vertex: 'Vertex',
   xai: 'Grok',

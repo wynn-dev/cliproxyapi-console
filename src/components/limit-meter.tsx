@@ -62,11 +62,17 @@ export function AccountMeters({
   // whichever reading the meter shows.
   const fable = reserve?.fable?.[c.name]
   const fableHeld = fable && { label: fable.billing ? 'Paid extra usage' : 'Reserved', until: fable.until }
+  // Antigravity's limits are per model family, each held on its own (the 5-hour reserve).
+  const antigravity = c.provider === 'antigravity' ? reserve?.antigravity?.[c.name] : undefined
 
   if (!windows.length) {
     return (
       <p className={cn('text-xs text-muted-foreground', className)}>
-        {['claude', 'codex'].includes(c.provider) ? "No reading yet. Limits appear after this account's next request." : 'This provider does not report usage limits.'}
+        {c.provider === 'antigravity'
+          ? 'No reading yet. The console reads the quota of each model family within a few minutes.'
+          : ['claude', 'codex'].includes(c.provider)
+            ? "No reading yet. Limits appear after this account's next request."
+            : 'This provider does not report usage limits.'}
       </p>
     )
   }
@@ -75,6 +81,7 @@ export function AccountMeters({
       {meters.map(({ w, at, checked, kept }) => {
         const id = RESERVE_WINDOWS[w.label]
         const isFable = c.provider === 'claude' && w.label === 'Fable'
+        const familyUntil = antigravity?.[w.label]
         return (
           <LimitMeter
             key={w.id}
@@ -83,8 +90,8 @@ export function AccountMeters({
             observedAt={at}
             checked={checked}
             older={kept}
-            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : undefined}
-            held={held && heldOn(w) ? held : isFable ? fableHeld : undefined}
+            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : c.provider === 'antigravity' ? reserve?.limits['5h'] : undefined}
+            held={held && heldOn(w) ? held : isFable ? fableHeld : familyUntil ? { label: 'Reserved', until: familyUntil } : undefined}
             detailed={detailed}
           />
         )

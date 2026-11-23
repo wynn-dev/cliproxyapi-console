@@ -5,7 +5,7 @@ import { paths } from './env.ts'
 import { releaseFable } from './fable.ts'
 import { recordLimitReading } from './limit-history.ts'
 import { fableResetStatus, forgetReset, limitResets, resetOutcome, resetStatus, saveReset, type ResetKind, type ResetOutcome } from './limit-resets.ts'
-import { limitWindows } from './limit-windows.ts'
+import { ANTIGRAVITY_FAMILIES, limitWindows } from './limit-windows.ts'
 import { limitReadings, saveReading, type ListedCredential } from './limits.ts'
 import { credentialFile, management } from './management.ts'
 import { releaseFiveHour, reserveStatus } from './reserve.ts'
@@ -20,6 +20,12 @@ import { db } from './usage.ts'
  * over 10 minutes old. It goes through CPA's api-call, which fills in the account's token.
  *
  * Opt-in: the endpoints are undocumented, and calling them is a terms-of-service grey area.
+ *
+ * Antigravity accounts (Gemini subscriptions) are read whether this is on or off: CPA learns
+ * nothing about their quota from their traffic, so this is the only reading they get. The call is
+ * the one the Antigravity app reads its quota from, `fetchAvailableModels`, which CPA itself makes
+ * for every Antigravity account to learn its models. It goes through CPA like the others, with the
+ * Antigravity app's user agent, never straight to Google.
  */
 
 /** A reading this old gets checked. Also the shortest gap between two checks of one account. */
@@ -35,13 +41,18 @@ const FABLE_RESET_STALE_MS = 3 * 86_400_000
 const UNSETTLED_MS = 10 * 60_000
 
 /**
- * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL and CPA_CONSOLE_CODEX_USAGE_URL point one provider's
- * checks at a mock on this machine, reached directly rather than through the account's proxy, and
+ * For tests only: CPA_CONSOLE_CLAUDE_USAGE_URL, CPA_CONSOLE_CODEX_USAGE_URL and
+ * CPA_CONSOLE_ANTIGRAVITY_USAGE_URL point one provider's checks at a mock on this machine, reached directly rather than through the account's proxy, and
  * CPA_CONSOLE_CLAUDE_RESET_URL does the same for using a limit reset (it stands for
  * `https://api.anthropic.com`). Not a user option. So a test never reaches a real provider, setting
  * any of them turns off the calls without their own, and any host but this machine turns that call off.
  */
-const TESTING = !!(process.env.CPA_CONSOLE_CLAUDE_USAGE_URL || process.env.CPA_CONSOLE_CODEX_USAGE_URL || process.env.CPA_CONSOLE_CLAUDE_RESET_URL)
+const TESTING = !!(
+  process.env.CPA_CONSOLE_CLAUDE_USAGE_URL ||
+  process.env.CPA_CONSOLE_CODEX_USAGE_URL ||
+  process.env.CPA_CONSOLE_ANTIGRAVITY_USAGE_URL ||
+  process.env.CPA_CONSOLE_CLAUDE_RESET_URL
+)
 
 interface Endpoint {
   url: string
@@ -66,18 +77,31 @@ function endpoint(variable: string, real: string, off: string): Endpoint | undef
   return undefined
 }
 
+/** Where CPA's Antigravity executor sends an account's requests unless its file sets `base_url` (antigravity_executor_request.go). */
+const ANTIGRAVITY_ORIGIN = 'https://daily-cloudcode-pa.googleapis.com'
+const ANTIGRAVITY_MODELS_PATH = '/v1internal:fetchAvailableModels'
+
 const ENDPOINTS: Record<string, Endpoint | undefined> = {
   claude: endpoint('CPA_CONSOLE_CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage', "Claude accounts won't be checked"),
   codex: endpoint('CPA_CONSOLE_CODEX_USAGE_URL', 'https://chatgpt.com/backend-api/wham/usage', "Codex accounts won't be checked"),
+  // The account's own `base_url` replaces the origin, as CPA's Antigravity executor does.
+  antigravity: endpoint('CPA_CONSOLE_ANTIGRAVITY_USAGE_URL', `${ANTIGRAVITY_ORIGIN}${ANTIGRAVITY_MODELS_PATH}`, "Antigravity accounts won't be checked"),
 }
 /** Where a Claude limit reset is used: `/api/organizations/<organization>/reset_rate_limits` under it. */
 const RESET_ORIGIN = endpoint('CPA_CONSOLE_CLAUDE_RESET_URL', 'https://api.anthropic.com', "Claude limit resets can't be used")
 
-/** CPA's own defaults (claude_device_profile.go, codex_executor_request.go), used unless config.yaml sets one. */
+/**
+ * CPA's own defaults (claude_device_profile.go, codex_executor_request.go, antigravity_version.go),
+ * used unless config.yaml (or for Antigravity the account's file) sets one. CPA moves its Antigravity
+ * version up once it learns of a newer app release; this is its floor.
+ */
 const DEFAULT_USER_AGENT = {
   claude: 'claude-cli/2.1.280 (external, cli)',
   codex: 'codex-tui/0.154.0 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.154.0)',
+  antigravity: 'antigravity/hub/2.34.0 (aidev_client; os_type=darwin; arch=arm64; cl=1026637980)',
 }
+
+type Provider = keyof typeof DEFAULT_USER_AGENT
 
 /** The user agent CPA sends for this provider, so a check looks like the account's other traffic. */
 function userAgent(provider: 'claude' | 'codex') {
@@ -153,7 +177,7 @@ export function limitCheckStatus() {
   }
 }
 
-type Listed = ListedCredential & { auth_index?: string; account_type?: string; id_token?: { chatgpt_account_id?: string } }
+type Listed = ListedCredential & { auth_index?: string; account_type?: string; project_id?: string; id_token?: { chatgpt_account_id?: string } }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : undefined)
 const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined)
@@ -175,6 +199,36 @@ const percent = (v: number | undefined) => (v !== undefined && v >= 0 && v <= 10
 
 /** The models whose own weekly limit is the Fable window, by the name the usage response gives them (Claude Code's list). */
 const FABLE_MODELS = new Set(['fable', 'fable 5', 'fable 5.1'])
+
+/**
+ * Antigravity's `fetchAvailableModels` answer as `antigravity-<family>-remaining` (the share left, 0
+ * to 1) and `-reset` (unix seconds), or why it can't be used. Every model has its own `quotaInfo`;
+ * a family's limit is its model with the least left. The answer leaves out a share of zero, as
+ * protobuf JSON does, so a quota with a reset time and no share is used up. Models of other
+ * families (Antigravity's internal ones) are not read.
+ */
+export function antigravitySignals(body: unknown, now: number): Record<string, string> | string {
+  const models = obj(obj(body)?.models)
+  if (!models) return 'The answer listed no models'
+  const least = new Map<string, { left: number; reset?: number }>()
+  for (const [id, model] of Object.entries(models)) {
+    const family = id.toLowerCase().split('-')[0]!
+    const quota = obj(obj(model)?.quotaInfo)
+    if (!(family in ANTIGRAVITY_FAMILIES) || !quota) continue
+    const reset = unixSeconds(quota.resetTime)
+    const left = quota.remainingFraction === undefined && reset ? 0 : num(quota.remainingFraction)
+    if (left === undefined || left < 0 || left > 1.01) continue
+    const was = least.get(family)
+    if (!was || left < was.left) least.set(family, { left: Math.min(left, 1), reset: plausibleReset(reset, now) ? reset : undefined })
+  }
+  if (!least.size) return 'The answer had no model quotas'
+  const out: Record<string, string> = {}
+  for (const [family, { left, reset }] of least) {
+    out[`antigravity-${family}-remaining`] = String(left)
+    if (reset) out[`antigravity-${family}-reset`] = String(reset)
+  }
+  return out
+}
 
 /**
  * Claude's usage response as the `anthropic-ratelimit-unified-*` headers it stands for, or why it
@@ -291,11 +345,15 @@ function fail(name: string, prev: Row | undefined, now: number, status: number, 
  * One call to a provider as the account, through CPA, which fills in its token. A string says why
  * it got no answer; undefined that CPA is stopped or restarting, which is not the account's fault.
  */
-async function call(f: Listed, target: Endpoint, url: string, post?: { data: string; timeoutMs: number }) {
-  const provider = f.provider as 'claude' | 'codex'
-  const header: Record<string, string> = { Authorization: 'Bearer $TOKEN$', Accept: 'application/json', 'User-Agent': userAgent(provider) }
+async function call(f: Listed, target: Endpoint, url: string, post?: { data: string; timeoutMs?: number; userAgent?: string }) {
+  const provider = f.provider as Provider
+  // Antigravity's own calls carry only these, and so do CPA's (sdk/auth/antigravity_models.go).
+  const header: Record<string, string> =
+    provider === 'antigravity'
+      ? { Authorization: 'Bearer $TOKEN$', 'User-Agent': post?.userAgent ?? DEFAULT_USER_AGENT.antigravity }
+      : { Authorization: 'Bearer $TOKEN$', Accept: 'application/json', 'User-Agent': userAgent(provider) }
   if (provider === 'claude') header['anthropic-beta'] = 'oauth-2025-04-20'
-  else {
+  else if (provider === 'codex') {
     header.Originator = 'codex-tui'
     if (f.id_token?.chatgpt_account_id) header['ChatGPT-Account-Id'] = f.id_token.chatgpt_account_id
   }
@@ -318,10 +376,25 @@ async function call(f: Listed, target: Endpoint, url: string, post?: { data: str
   return { status: out.status_code ?? 0, body: out.body ?? '' }
 }
 
+/**
+ * An Antigravity account's quota call, made as CPA makes its own: to the account's `base_url` if it
+ * sets one, for its project, with the user agent its file sets (CPA's `user_agent` field) or CPA's.
+ */
+async function antigravityCall(f: Listed, target: Endpoint) {
+  const file = await credentialFile(f.name).catch(() => ({}) as Record<string, unknown>)
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+  const base = str(file.base_url)?.replace(/\/+$/, '')
+  // CPA drops the Node client suffix of an Antigravity user agent for these calls.
+  const ua = str(file.user_agent)?.replace(/^(antigravity\/.*?) google-api-nodejs-client\/.*$/i, '$1')
+  const project = str(f.project_id) ?? str(file.project_id)
+  const url = base && !target.direct ? `${base}${ANTIGRAVITY_MODELS_PATH}` : target.url
+  return call(f, target, url, { data: JSON.stringify(project ? { project } : {}), userAgent: ua })
+}
+
 async function check(f: Listed, prev: Row | undefined, now: number) {
-  const provider = f.provider as 'claude' | 'codex'
+  const provider = f.provider as Provider
   const target = ENDPOINTS[provider]!
-  const res = await call(f, target, target.url)
+  const res = provider === 'antigravity' ? await antigravityCall(f, target) : await call(f, target, target.url)
   if (!res) return
   if (typeof res === 'string') return fail(f.name, prev, now, 0, res)
   const { status } = res
@@ -335,7 +408,7 @@ async function check(f: Listed, prev: Row | undefined, now: number) {
   } catch {
     return fail(f.name, prev, now, status, 'The answer was not JSON')
   }
-  const signals = provider === 'claude' ? claudeSignals(body, now) : codexSignals(body, now)
+  const signals = provider === 'claude' ? claudeSignals(body, now) : provider === 'codex' ? codexSignals(body, now) : antigravitySignals(body, now)
   if (typeof signals === 'string') return fail(f.name, prev, now, status, signals)
   // Nothing is carried over from the last reading: it would be stored as if seen now.
   const reading = canonical(signals)
@@ -483,14 +556,15 @@ export async function useLimitReset(name: string, kind: ResetKind = '5h'): Promi
   }
 }
 
-/** Checks the account with the oldest reading, if any is due. */
-async function checkNext(now = Date.now()) {
+/** Checks the account with the oldest reading, if any is due. Exported for tests. */
+export async function checkNext(now = Date.now()) {
   const res = await management('/credentials')
   if (!res?.ok) return
   const { files } = (await res.json()) as { files?: Listed[] }
   const readings = limitReadings()
   const checks = rows()
   const held = reserveStatus().accounts
+  const enabled = limitChecksEnabled()
   // Forget credentials that were removed; an empty list is more likely CPA still loading.
   if (files?.length) {
     for (const name of new Set([...checks.keys(), ...Object.keys(limitResets()), ...Object.keys(limitResets('fable'))])) {
@@ -505,6 +579,7 @@ async function checkNext(now = Date.now()) {
     // reserve holds, so it sees them recover; one the user turned off, or that needs a new sign-in
     // (its token is dead), is left alone.
     if (!f.provider || !ENDPOINTS[f.provider] || f.account_type !== 'oauth' || !f.auth_index) continue
+    if (!enabled && f.provider !== 'antigravity') continue
     if (f.disabled && (!(f.name in held) || held[f.name].reason === 'signed-out')) continue
     const readAt = Math.max(Date.parse(readings[f.name]?.observed_at ?? '') || 0, Date.parse(f.quota?.observed_at ?? '') || 0)
     if (now - readAt < STALE_MS) continue
@@ -518,7 +593,8 @@ async function checkNext(now = Date.now()) {
 export function startLimitChecks() {
   let busy = false
   setInterval(async () => {
-    if (busy || !limitChecksEnabled()) return
+    // Antigravity accounts are read with checks off too.
+    if (busy) return
     busy = true
     try {
       await checkNext()

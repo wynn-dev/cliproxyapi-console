@@ -436,7 +436,7 @@ http_headers = { Authorization = "Bearer ${clientKey}" }
 }
 
 function OtherClients({ origin, clientKey }: { origin: string; clientKey: string }) {
-  const [format, setFormat] = useState<'openai' | 'anthropic'>('openai')
+  const [format, setFormat] = useState<'openai' | 'anthropic' | 'gemini'>('openai')
   const models = useQuery({
     queryKey: ['console', 'v1', 'models'],
     queryFn: () => consoleApi<{ data?: ProxyModel[] }>('/v1/models'),
@@ -445,12 +445,13 @@ function OtherClients({ origin, clientKey }: { origin: string; clientKey: string
   const [picked, setModel] = useState<string>()
   const list = models.data ?? []
   const has = (id?: string | null) => !!id && list.some((m) => m.id === id)
-  // The newest Claude Sonnet, else the first model.
-  const sonnet = list
-    .map((m) => m.id)
-    .filter((id) => id.startsWith('claude-sonnet-'))
-    .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))[0]
-  const fallback = [sonnet, list[0]?.id].find(has)
+  // The newest Claude Sonnet (Gemini model for the Gemini format), else the first model.
+  const newest = (prefix: string) =>
+    list
+      .map((m) => m.id)
+      .filter((id) => id.startsWith(prefix))
+      .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))[0]
+  const fallback = [newest(format === 'gemini' ? 'gemini-' : 'claude-sonnet-'), list[0]?.id].find(has)
   const model = (has(picked) ? picked : fallback) ?? '<model>'
 
   const curl =
@@ -459,7 +460,12 @@ function OtherClients({ origin, clientKey }: { origin: string; clientKey: string
   -H "Authorization: Bearer ${clientKey}" \\
   -H "Content-Type: application/json" \\
   -d '{"model": "${model}", "messages": [{"role": "user", "content": "Hello"}]}'`
-      : `curl ${origin}/v1/messages \\
+      : format === 'gemini'
+        ? `curl "${origin}/v1beta/models/${model}:generateContent" \\
+  -H "x-goog-api-key: ${clientKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"contents": [{"role": "user", "parts": [{"text": "Hello"}]}]}'`
+        : `curl ${origin}/v1/messages \\
   -H "x-api-key: ${clientKey}" \\
   -H "anthropic-version: 2023-06-01" \\
   -H "Content-Type: application/json" \\
@@ -489,6 +495,7 @@ function OtherClients({ origin, clientKey }: { origin: string; clientKey: string
               options={[
                 { value: 'openai', label: 'OpenAI format' },
                 { value: 'anthropic', label: 'Anthropic format' },
+                { value: 'gemini', label: 'Gemini format' },
               ]}
             />
           }

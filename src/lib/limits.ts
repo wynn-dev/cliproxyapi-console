@@ -1,4 +1,4 @@
-import { hasReading, limitWindows, type LimitReading } from '../../server/limit-windows.ts'
+import { ANTIGRAVITY_FAMILIES, hasReading, limitWindows, type LimitReading } from '../../server/limit-windows.ts'
 
 export * from '../../server/limit-windows.ts'
 
@@ -25,8 +25,8 @@ export interface PoolLimit {
   nextReset?: { at: number; gain: number }
 }
 
-/** The limits worth adding up: the weekly one, and for Claude the Fable models' own. */
-const pooled = (provider: string) => (provider === 'claude' ? ['Weekly', 'Fable'] : ['Weekly'])
+/** The limits worth adding up: the weekly one, for Claude the Fable models' own, and for Antigravity its Gemini models'. */
+const pooled = (provider: string) => (provider === 'claude' ? ['Weekly', 'Fable'] : provider === 'antigravity' ? [ANTIGRAVITY_FAMILIES.gemini!] : ['Weekly'])
 
 /**
  * Each provider's weekly limit added up over its accounts, each account counting the same whatever

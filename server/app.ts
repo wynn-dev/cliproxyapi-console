@@ -14,6 +14,7 @@ import { insights } from './insights.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitCheckStatus, setLimitChecks, useLimitReset } from './limit-checks.ts'
 import { limitReadings } from './limits.ts'
+import { antigravityStatus } from './antigravity.ts'
 import { fableStatus } from './fable.ts'
 import { apiKeyStatus, setBalance, setFallback } from './fallback.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
@@ -227,7 +228,7 @@ app.get('/console/api/limits/history', (c) => {
 app.route('/console/api/insights', insights)
 app.route('/console/api/share', share)
 
-const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), warnings: signInWarnings() })
+const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), antigravity: antigravityStatus(), warnings: signInWarnings() })
 
 app.get('/console/api/reserve', (c) => c.json(holdStatus()))
 

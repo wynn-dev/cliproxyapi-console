@@ -2,6 +2,11 @@
  * Usage limits per account, read from the rate-limit headers CPA last saw for it
  * (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex). Shared by the server (the
  * account reserve) and the SPA, so it imports nothing.
+ *
+ * Antigravity (Gemini subscriptions) has none. CPA learns no quota from its traffic, and the console
+ * does not ask Google for it: only the Antigravity app's own `fetchAvailableModels` reports it, and
+ * the console can only send that through CPA's api-call, whose HTTP client is not the one CPA's
+ * Antigravity requests use, so it would not look exactly like the app.
  */
 
 export interface LimitReading {
@@ -42,6 +47,12 @@ function windowLabel(minutes: number | undefined, slot: string) {
 }
 
 const titleCase = (s: string) => s.replace(/(^|-)([a-z])/g, (_, sep: string, c: string) => (sep ? ' ' : '') + c.toUpperCase())
+
+/**
+ * A limit gauge the Overview can hide: one provider's limit by the label limitWindows gives it, for
+ * its accounts' meters and its total over the accounts alike.
+ */
+export const gaugeKey = (provider: string, label: string) => `${provider}:${label}`
 
 export const hasReading = (r: LimitReading | undefined): r is LimitReading => !!r && Object.keys(r.signals ?? {}).length > 0
 

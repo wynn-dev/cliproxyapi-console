@@ -240,6 +240,23 @@ app.put('/console/api/limit-checks', async (c) => {
   return c.json(limitCheckStatus())
 })
 
+// Which limit gauges the Overview shows. Display only.
+const gauges = () => ({ hidden: readState().hiddenGauges ?? [] })
+
+app.get('/console/api/gauges', (c) => c.json(gauges()))
+
+// One gauge at a time, applied to the saved list, so quick toggles from one or more browsers each stick.
+app.patch('/console/api/gauges', async (c) => {
+  const body: { gauge?: unknown; shown?: unknown } = await c.req.json().catch(() => ({}))
+  const { gauge, shown } = body
+  if (typeof gauge !== 'string' || !gauge || gauge.length > 200) return c.json({ error: 'gauge must be a gauge name' }, 400)
+  if (typeof shown !== 'boolean') return c.json({ error: 'shown must be true or false' }, 400)
+  const hidden = gauges().hidden.filter((g) => g !== gauge)
+  if (!shown && hidden.length >= 200) return c.json({ error: 'Too many hidden gauges' }, 400)
+  updateState({ hiddenGauges: shown ? hidden : [...hidden, gauge] })
+  return c.json(gauges())
+})
+
 // Uses a Claude account's weekly limit reset, or one of its Fable resets. Only on the user's own click; nothing else calls it.
 app.post('/console/api/limit-resets', async (c) => {
   const body: { name?: unknown; kind?: unknown } = await c.req.json().catch(() => ({}))

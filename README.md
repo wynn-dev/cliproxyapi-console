@@ -12,14 +12,15 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
   and when it resets, plus each provider's weekly limit and Claude's Fable limit added up across accounts. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
   so people who use the account directly keep some room. Accounts that start billing paid extra usage are held too, and
   signed-out accounts are taken out of rotation until you sign them in again. A Claude account's panel says whether its
-  once-a-week reset of the 5-hour limit is left and how many Fable resets it has, and lets you use them.
+  once-a-week reset of the 5-hour limit is left and how many Fable resets it has, and lets you use them. **Gauges** on
+  the Overview picks which limits it shows (for all browsers); account panels still show every limit.
 - **Smart account order**: with fill first, among accounts of the same priority, the one whose weekly limit resets soonest is used first, and
   accounts close to their reserve stop taking new conversations while ongoing ones keep their prompt cache.
 - **Wrapped**: each month, or all time, as slides to post (tokens, value at API prices, top models, your daily rhythm,
   streaks, conversations, awards and more), or played full screen as a story.
 - **Insights**: when each pool will reach its reserve at the current pace, which conversations lost their prompt cache
   and why, and a plain summary of the last 7 days.
-- **Credentials**: Claude and Codex sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
+- **Credentials**: Claude, Codex and Gemini (Antigravity) sign-in, file uploads, enable/disable, cooldowns, per-credential traffic and bulk actions.
 - **API providers & client keys**: structured editors instead of raw YAML. Each upstream API key shows its spend at API
   prices, its rate limits and, once you enter your balance, the credits it has left. It is flagged when the provider
   says it is out of credits.
@@ -65,6 +66,25 @@ fill in the form.
 Clients then connect straight to CPA, e.g. `http://<server>:8317/v1`, using the client key shown on the Overview page.
 The Connect page has ready-to-run setup for Claude Code, Codex and other clients, with the address and key of your choice
 filled in, and checks from your browser that both work.
+
+### Gemini subscriptions
+
+Gemini subscriptions sign in through CLIProxyAPI's Antigravity provider (**Credentials → Add → Antigravity**). All of
+their traffic goes out through CLIProxyAPI as the Antigravity app. The console never sends a request to Google itself,
+and offers no Gemini CLI or Gemini API key sign-in for subscriptions.
+
+Antigravity accounts show **no limits**. CLIProxyAPI learns nothing about their quota from their traffic and keeps none,
+and the only way to read it, the Antigravity app's own quota call, could only be sent from the console through
+CLIProxyAPI's generic `api-call`, which would not look exactly like the app. So there are no meters, no reserve and no
+limits added up for these accounts. When a model runs out, CLIProxyAPI cools it down on that account and moves on, as
+long as cooldowns are on (**Settings → Routing → Disable cooldowns** off, the default, with no provider or credential
+turning them off); with cooldowns off it keeps sending to the used-up account.
+Signed-out accounts are taken out of rotation like Claude and Codex ones. Smart account order, the run-out forecast and
+API key fallback cover Claude and Codex only.
+
+Their traffic shows in Usage like any other account's. Claude models served through Antigravity get their API price;
+Gemini models have none in the console yet. Clients reach Gemini models at the usual addresses; Connect → Other
+clients has a Gemini-format request too.
 
 ### Keep it running
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowRightIcon, ChevronRightIcon } from 'lucide-react'
+import { ArrowRightIcon, ChevronRightIcon, GaugeIcon } from 'lucide-react'
 import { useState } from 'react'
 import { StatusDot } from '@/components/common'
 import { CredentialSheet } from '@/components/credentials/credential-sheet'
@@ -11,17 +11,19 @@ import { AccountMeters, PoolMeter } from '@/components/limit-meter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
 import { fmtAgo } from '@/lib/format'
-import { accountReadings, limitWindows, poolLimits } from '@/lib/limits'
+import { accountReadings, gaugeKey, limitWindows, poolLimits } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
-import { queries } from '@/lib/queries'
+import { queries, useGaugeToggle } from '@/lib/queries'
 import { hasAccountPool, keepsCachesWarm, routingOf, strategyLabel } from '@/lib/routing'
 import type { Credential, LimitCheck, ReserveStatus } from '@/lib/types'
 
-const PROVIDER_ORDER = ['claude', 'codex']
+const PROVIDER_ORDER = ['claude', 'codex', 'antigravity']
 
 /** Providers first, then the order fill-first routing tries accounts in: priority, then file name. */
 function byRoutingOrder(a: Credential, b: Credential) {
@@ -37,6 +39,8 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const checks = useQuery({ ...queries.limitChecks(), enabled: running })
   const config = useQuery({ ...queries.config(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
+  const hiddenList = useQuery({ ...queries.gauges(), enabled: running }).data?.hidden
+  const hidden = new Set(hiddenList)
   const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
   const routing = routingOf(config.data)
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
@@ -56,13 +60,23 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
       : [],
     now,
   ).filter((p) => p.accounts > 1)
+  // Every gauge the accounts have, for the picker: each limit once per provider, in the accounts' order.
+  const gauges = new Map<string, string>()
+  for (const c of accounts) {
+    const { reading, older } = accountReadings(c.quota, stored.data?.[c.name])
+    for (const w of [...limitWindows(c.provider, reading, now), ...limitWindows(c.provider, older, now)]) {
+      gauges.set(gaugeKey(c.provider, w.label), `${providerLabel(c.provider)} ${w.label}`)
+    }
+  }
+  const shownPools = pools.filter((p) => !hidden.has(gaugeKey(p.provider, p.label)))
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Accounts</CardTitle>
         <CardDescription>How much of each usage limit is left, as each provider last reported it. Select an account for details.</CardDescription>
-        <CardAction>
+        <CardAction className="flex items-center gap-1">
+          {running && gauges.size > 0 && <GaugePicker gauges={gauges} hidden={hiddenList} />}
           <Button variant="ghost" size="sm" asChild>
             <Link to="/credentials">
               Manage <ArrowRightIcon />
@@ -87,12 +101,12 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
           </Empty>
         ) : (
           <>
-            {pools.length > 0 && (
+            {shownPools.length > 0 && (
               <div className="grid items-start gap-x-8 gap-y-3 border-b pb-4 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
                 <div className="space-y-1">
                   <div className="text-sm font-medium">All accounts</div>
                   <div className="text-sm text-muted-foreground">
-                    {pools.some((p) => p.label === 'Fable') ? 'Weekly and Fable limits' : 'Weekly limits'} added up, per provider
+                    {[...new Set(shownPools.map((p) => p.label))].join(', ').replace(/, ([^,]*)$/, ' and $1')} limits added up, per provider
                   </div>
                 </div>
                 <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -110,6 +124,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
                   readings={accountReadings(c.quota, stored.data?.[c.name])}
                   check={checks.data?.enabled ? checks.data.accounts[c.name] : undefined}
                   reserve={reserve.data}
+                  hidden={hidden}
                   now={now}
                   onOpen={() => setOpen(c.name)}
                 />
@@ -155,6 +170,7 @@ function AccountRow({
   readings: { reading, older },
   check,
   reserve,
+  hidden,
   now,
   onOpen,
 }: {
@@ -163,6 +179,8 @@ function AccountRow({
   /** The account's last limit check, while checks are on. */
   check?: LimitCheck
   reserve?: ReserveStatus
+  /** Gauges the user left out of the Overview, by gaugeKey. */
+  hidden: ReadonlySet<string>
   now: number
   onOpen: () => void
 }) {
@@ -237,8 +255,51 @@ function AccountRow({
         checkedAt={check?.okAt}
         reserve={reserve}
         now={now}
+        hidden={hidden}
         className="sm:grid-cols-3 xl:grid-cols-4"
       />
     </li>
+  )
+}
+
+/**
+ * Which limit gauges the Overview shows, saved in the console so it holds for every browser. Only
+ * what is shown here: the account panel still shows every limit, and the reserve ignores this.
+ */
+function GaugePicker({ gauges, hidden }: { gauges: Map<string, string>; hidden?: string[] }) {
+  const toggle = useGaugeToggle()
+  // Until the saved choice is in, there is nothing to change it from.
+  if (!hidden) {
+    return (
+      <Button variant="ghost" size="sm" disabled>
+        <GaugeIcon />
+        Gauges
+      </Button>
+    )
+  }
+  const shown = [...gauges.keys()].filter((k) => !hidden.includes(k)).length
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <GaugeIcon />
+          Gauges
+          {shown < gauges.size && (
+            <span className="text-muted-foreground tabular">
+              {shown}/{gauges.size}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-60 space-y-1 p-2">
+        <div className="px-2 pt-1 pb-1.5 text-xs text-muted-foreground">Limits shown here. Account panels still show every limit.</div>
+        {[...gauges].map(([key, label]) => (
+          <label key={key} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+            <Checkbox checked={!hidden.includes(key)} onCheckedChange={(v) => toggle.mutate({ gauge: key, shown: v === true })} />
+            {label}
+          </label>
+        ))}
+      </PopoverContent>
+    </Popover>
   )
 }

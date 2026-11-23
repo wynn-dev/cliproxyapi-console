@@ -25,7 +25,7 @@ import { db } from './usage.ts'
  * after it began.
  */
 
-const PROVIDERS = new Set(['claude', 'codex'])
+const PROVIDERS = new Set(['claude', 'codex', 'antigravity'])
 /** Usage-record failures must span this long, and the last must be this recent, to warn. */
 const MIN_SPAN = 5 * 60_000
 const RECENT = 35 * 60_000

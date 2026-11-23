@@ -25,8 +25,11 @@ export interface PoolLimit {
   nextReset?: { at: number; gain: number }
 }
 
-/** The limits worth adding up: the weekly one, and for Claude the Fable models' own. */
-const pooled = (provider: string) => (provider === 'claude' ? ['Weekly', 'Fable'] : ['Weekly'])
+/**
+ * The limits worth adding up: the weekly one, and for Claude the Fable models' own. Antigravity
+ * reports none (see limitWindows), so its accounts would only count as unused.
+ */
+const pooled = (provider: string) => (provider === 'claude' ? ['Weekly', 'Fable'] : provider === 'antigravity' ? [] : ['Weekly'])
 
 /**
  * Each provider's weekly limit added up over its accounts, each account counting the same whatever

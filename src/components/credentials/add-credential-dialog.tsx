@@ -36,7 +36,7 @@ export function AddCredentialDialog({ open, onOpenChange }: { open: boolean; onO
       <DialogContent className="gap-5 sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Add credential</DialogTitle>
-          <DialogDescription>Sign in with a Claude or Codex account, or upload auth files you already have.</DialogDescription>
+          <DialogDescription>Sign in with a Claude, Codex or Gemini (Antigravity) account, or upload auth files you already have.</DialogDescription>
         </DialogHeader>
         <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
           <TabsList className="w-full">

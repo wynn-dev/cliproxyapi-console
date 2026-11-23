@@ -483,8 +483,8 @@ export async function useLimitReset(name: string, kind: ResetKind = '5h'): Promi
   }
 }
 
-/** Checks the account with the oldest reading, if any is due. */
-async function checkNext(now = Date.now()) {
+/** Checks the account with the oldest reading, if any is due. Exported for tests. */
+export async function checkNext(now = Date.now()) {
   const res = await management('/credentials')
   if (!res?.ok) return
   const { files } = (await res.json()) as { files?: Listed[] }

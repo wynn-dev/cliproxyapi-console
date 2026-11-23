@@ -11,7 +11,7 @@ import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { ReserveStatus } from '@/lib/types'
 
-const PROVIDER_ORDER = ['claude', 'codex']
+const PROVIDER_ORDER = ['claude', 'codex', 'antigravity']
 
 /** Why accounts are out, in the order a user can act on them. */
 const REASONS: { state: Exclude<Availability, 'available'>; label: (n: number) => string }[] = [

@@ -2,7 +2,7 @@ import { credentialByIndex, limitHistory, type LimitSample } from './limit-histo
 import { byAccount, leftAt, sampleAt } from './insights-history.ts'
 import type { CacheBreak, CacheBreakCause, CacheBreakReport } from './insights-types.ts'
 import { reserveLimits } from './reserve.ts'
-import { db } from './usage.ts'
+import { db, onUsageCleared } from './usage.ts'
 
 /**
  * Cache-break detector. A prompt cache lives on one account, per model, for 5 minutes after its
@@ -61,7 +61,8 @@ const newRequests = db.prepare(
     is_compaction AS compaction
    FROM requests WHERE id > ? AND session_id != '' AND failed = 0 AND input_tokens > 0 ORDER BY id LIMIT 2000`,
 )
-const firstIdSince = db.prepare('SELECT MIN(id) AS id FROM requests WHERE ts >= ?')
+/** The id before the first request since `?`; with none, the last id, as every request is older. */
+const startId = db.prepare('SELECT COALESCE((SELECT MIN(id) FROM requests WHERE ts >= ?), (SELECT MAX(id) FROM requests) + 1, 1) - 1 AS id')
 /** The last failure between two requests of a session: a failed attempt of the later one, or the old account failing. */
 const failureBetween = db.prepare(
   `SELECT status_code AS status FROM requests
@@ -73,7 +74,10 @@ const failureBetween = db.prepare(
  * each session and model, the time of each conversation's last request that had one before it to
  * compare with, and the breaks of the last KEEP_MS. Each call only reads the requests added since.
  */
-const state = { id: undefined as number | undefined, last: new Map<string, Row>(), compared: new Map<string, number>(), breaks: [] as CacheBreak[], prunedAt: 0 }
+const fresh = () => ({ id: undefined as number | undefined, last: new Map<string, Row>(), compared: new Map<string, number>(), breaks: [] as CacheBreak[], prunedAt: 0 })
+let state = fresh()
+// Clearing usage forgets the breaks with it, and ids start over.
+onUsageCleared(() => (state = fresh()))
 
 /** Limit history around [from, to], for why a session moved: the reserve's windows by account and account-wide signals. */
 function limitContext(from: number, to: number) {
@@ -154,7 +158,7 @@ function detect(rows: Row[]) {
 function advance(now: number, budgetMs = Infinity) {
   const start = performance.now()
   // The first call starts KEEP_MS back, with CONTEXT_MS before it for the requests the first breaks compare with.
-  state.id ??= ((firstIdSince.get(now - KEEP_MS - CONTEXT_MS) as { id: number | null }).id ?? Number.MAX_SAFE_INTEGER) - 1
+  state.id ??= (startId.get(now - KEEP_MS - CONTEXT_MS) as { id: number }).id
   for (;;) {
     const rows = newRequests.all(state.id) as unknown as Row[]
     if (!rows.length) break

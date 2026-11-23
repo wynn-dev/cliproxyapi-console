@@ -890,7 +890,14 @@ export function apiKeySpend(authIndex: string, since: { day: number; week: numbe
   }
 }
 
+const clearedListeners: (() => void)[] = []
+/** Called once all usage was cleared, for state kept outside these tables. */
+export function onUsageCleared(fn: () => void) {
+  clearedListeners.push(fn)
+}
+
 export function clearUsage() {
   db.exec(`DELETE FROM requests; DELETE FROM turned_away; DELETE FROM usage_rollup; DELETE FROM usage_rollup_dirty;
     DELETE FROM usage_sessions; DELETE FROM usage_sessions_dirty`)
+  for (const fn of clearedListeners) fn()
 }

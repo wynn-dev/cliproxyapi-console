@@ -21,6 +21,8 @@ export interface ConsoleState {
   limitChecks?: boolean
   /** When every account of a provider is held back, release the reserved one with the most left. Off unless true. */
   releaseWhenAllHeld?: boolean
+  /** Limit gauges the Overview leaves out, by gaugeKey. Display only: the reserve and routing ignore it. */
+  hiddenGauges?: string[]
   /** What the user pays for their plans, USD per month, for the share card. */
   planPrice?: number
   /** Upstream API keys the console tracks, by keyId (a hash, so the keys stay in config.yaml only). */

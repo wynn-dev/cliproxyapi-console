@@ -110,10 +110,7 @@ function SheetBody({
   // CPA forgets readings when it restarts; the console keeps the last one, and limit checks add newer ones.
   const { reading, older } = accountReadings(c.quota, stored?.[c.name])
   const checks = useQuery(queries.limitChecks()).data
-  // Antigravity accounts are read with limit checks off too: CPA learns nothing of their quota.
-  const read = checks?.enabled || c.provider === 'antigravity'
-  const checkedAt = read ? checks?.accounts[c.name]?.okAt : undefined
-  const checkError = c.provider === 'antigravity' ? checks?.accounts[c.name]?.error : undefined
+  const checkedAt = checks?.enabled ? checks.accounts[c.name]?.okAt : undefined
   const signals = Object.entries(reading?.signals ?? {})
   // The list endpoint doesn't echo prefix/proxy_url, so read them from the file; only those two fields are kept.
   const fileFields = useQuery({
@@ -287,7 +284,6 @@ function SheetBody({
           hint={reading?.observed_at ? `${Date.parse(reading.observed_at) === checkedAt ? 'Checked' : 'Reported'} ${fmtAgo(reading.observed_at)}` : undefined}
         >
           <AccountMeters account={c} reading={reading} older={older} checkedAt={checkedAt} reserve={reserve} now={now} detailed />
-          {checkError && <p className="text-xs text-muted-foreground">The last quota reading failed: {checkError}</p>}
           {c.provider === 'claude' && c.account_type === 'oauth' && (
             <>
               <LimitReset account={c} reading={reading} reset={checks?.resets[c.name]} now={now} />
@@ -298,7 +294,7 @@ function SheetBody({
             <details className="group text-xs">
               <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
                 <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />
-                {c.provider === 'antigravity' ? 'Raw reading' : 'Raw headers'}
+                Raw headers
               </summary>
               <dl className="mt-2 divide-y rounded-lg border">
                 {signals.map(([k, v]) => (

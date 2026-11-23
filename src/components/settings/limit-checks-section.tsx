@@ -19,10 +19,8 @@ export function LimitChecksSection({ onDirty }: { onDirty: DirtyReporter }) {
   useReportDirty('routing.limit-checks', form.dirty, onDirty)
 
   const names = new Map((credentials.data?.files ?? []).map((c) => [c.name, accountName(c)]))
-  const antigravity = new Set((credentials.data?.files ?? []).filter((c) => c.provider === 'antigravity').map((c) => c.name))
   const checks = Object.entries(data?.accounts ?? {}).filter(([name]) => !credentials.data || names.has(name))
-  // Antigravity accounts are read whether checks are on or off.
-  const failing = checks.filter(([name, c]) => c.error && (data?.enabled || antigravity.has(name)))
+  const failing = data?.enabled ? checks.filter(([, c]) => c.error) : []
   const last = Math.max(0, ...checks.map(([, c]) => c.checkedAt))
 
   return (
@@ -40,8 +38,7 @@ export function LimitChecksSection({ onDirty }: { onDirty: DirtyReporter }) {
           <>
             About every 10 minutes, the console asks Anthropic or OpenAI for the limits of each Claude and Codex account that hasn't served a
             request in that time, signed in as that account. It uses the usage pages Claude Code and Codex read their own usage from. They're
-            undocumented, and calling them like this is a terms-of-service grey area. Antigravity (Gemini) accounts are read either way:
-            their requests say nothing about their quota, so the console asks for it through CLIProxyAPI the way the Antigravity app does.
+            undocumented, and calling them like this is a terms-of-service grey area.
             <Default>off</Default>
           </>
         }

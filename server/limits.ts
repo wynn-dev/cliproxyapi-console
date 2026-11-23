@@ -1,4 +1,3 @@
-import { applyAntigravity } from './antigravity.ts'
 import { applyFable } from './fable.ts'
 import { applyFallback } from './fallback.ts'
 import { recordCredentialLimits } from './limit-history.ts'
@@ -89,7 +88,6 @@ export function startLimitRecorder() {
           ['Sign-in check', () => applySignIn(files)],
           ['Account reserve', () => applyReserve(files, readings)],
           ['Fable reserve', () => applyFable(files, readings)],
-          ['Antigravity reserve', () => applyAntigravity(files, readings)],
           ['Release', () => applyRelease(files, readings)],
           ['Account order', () => applyOrder(files, readings)],
           ['API key fallback', () => applyFallback(files)],

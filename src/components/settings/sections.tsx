@@ -239,8 +239,7 @@ export function ReserveSection({ onDirty }: { onDirty: DirtyReporter }) {
         description={
           <>
             The console disables an account once this share of its 5-hour limit or less is left, and enables it again when the limit resets.
-            Antigravity accounts have a limit per model family (Gemini, Claude, GPT-OSS) instead: a family down to this share stops taking
-            requests on that account until it resets, and the other families keep working. 0 turns this off.
+            0 turns this off.
             <Default>5%</Default>
           </>
         }

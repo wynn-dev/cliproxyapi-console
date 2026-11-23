@@ -8,11 +8,12 @@ CPA, runs it as a supervised process and gives you a polished UI to manage it. Y
 - **Usage analytics**: CPA only keeps per-request usage for a few minutes. The console drains it continuously into
   SQLite, so you get history by model, credential, client key and provider, with tokens, latency, failures, requests
   turned away before reaching an account, and what the traffic would have cost at API prices.
-- **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, and every Gemini
-  account (through Antigravity) with its Gemini, Claude and GPT-OSS quotas, how much of each is left and when it resets, plus each provider's weekly limit and Claude's Fable limit added up across accounts. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
+- **Accounts at a glance**: every Claude and Codex account with its 5-hour, weekly and Fable limits, how much of each is left
+  and when it resets, plus each provider's weekly limit and Claude's Fable limit added up across accounts. A reserve (5% by default) turns an account off before its limit runs out and back on when it resets,
   so people who use the account directly keep some room. Accounts that start billing paid extra usage are held too, and
   signed-out accounts are taken out of rotation until you sign them in again. A Claude account's panel says whether its
-  once-a-week reset of the 5-hour limit is left and how many Fable resets it has, and lets you use them.
+  once-a-week reset of the 5-hour limit is left and how many Fable resets it has, and lets you use them. **Gauges** on
+  the Overview picks which limits it shows (for all browsers); account panels still show every limit.
 - **Smart account order**: with fill first, among accounts of the same priority, the one whose weekly limit resets soonest is used first, and
   accounts close to their reserve stop taking new conversations while ongoing ones keep their prompt cache.
 - **Wrapped**: each month, or all time, as slides to post (tokens, value at API prices, top models, your daily rhythm,
@@ -68,20 +69,20 @@ filled in, and checks from your browser that both work.
 
 ### Gemini subscriptions
 
-Gemini subscriptions sign in through CLIProxyAPI's Antigravity provider (**Credentials → Add → Antigravity**), so every
-request, the account's traffic and the console's quota readings alike, goes out through CLIProxyAPI as the Antigravity
-app. The console never calls Google itself, and offers no Gemini CLI or Gemini API key sign-in for subscriptions.
+Gemini subscriptions sign in through CLIProxyAPI's Antigravity provider (**Credentials → Add → Antigravity**). All of
+their traffic goes out through CLIProxyAPI as the Antigravity app. The console never sends a request to Google itself,
+and offers no Gemini CLI or Gemini API key sign-in for subscriptions.
 
-CLIProxyAPI learns nothing about an Antigravity account's quota from its traffic, so the console reads it about every 10
-minutes the way the Antigravity app does (`fetchAvailableModels`, which CLIProxyAPI also calls for every Antigravity
-account to learn its models), whether idle-account limit checks are on or off. Each model family (Gemini, Claude,
-GPT-OSS) has its own quota, shown as its own meter. The 5-hour reserve holds a family on an account once it is down to
-its reserve, by excluding that family's models, and lets them back in when it resets; the account keeps serving the
-other families. Smart account order, the run-out forecast and API key fallback cover Claude and Codex only.
+Antigravity accounts show **no limits**. CLIProxyAPI learns nothing about their quota from their traffic and keeps none,
+and the only way to read it, the Antigravity app's own quota call, could only be sent from the console through
+CLIProxyAPI's generic `api-call`, which would not look exactly like the app. So there are no meters, no reserve and no
+limits added up for these accounts; when a model runs out, CLIProxyAPI cools it down on that account and moves on.
+Signed-out accounts are taken out of rotation like Claude and Codex ones. Smart account order, the run-out forecast and
+API key fallback cover Claude and Codex only.
 
 Their traffic shows in Usage like any other account's. Claude models served through Antigravity get their API price;
-Gemini models have none in the console yet, so they show no value at API prices. Clients reach Gemini models at the usual addresses; Connect → Other clients has a Gemini-format
-request too.
+Gemini models have none in the console yet. Clients reach Gemini models at the usual addresses; Connect → Other
+clients has a Gemini-format request too.
 
 ### Keep it running
 

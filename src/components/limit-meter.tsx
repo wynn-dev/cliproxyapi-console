@@ -2,7 +2,7 @@ import { Countdown } from '@/components/credentials/status'
 import { holdLabel, reserveHold } from '@/components/credentials/lib'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { fmtAgo, fmtWhen } from '@/lib/format'
-import { RESERVE_WINDOWS, limitWindows, type LimitReading, type LimitWindow, type PoolLimit } from '@/lib/limits'
+import { RESERVE_WINDOWS, gaugeKey, limitWindows, type LimitReading, type LimitWindow, type PoolLimit } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
 import type { Credential, ReserveStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -30,6 +30,7 @@ export function AccountMeters({
   reserve,
   now,
   detailed,
+  hidden,
   className,
 }: {
   account: Credential
@@ -42,6 +43,8 @@ export function AccountMeters({
   now: number
   /** Spell out what the tooltip says, for places a tap must reach it (the account panel). */
   detailed?: boolean
+  /** Gauges left out, by gaugeKey (the Overview's choice). */
+  hidden?: ReadonlySet<string>
   className?: string
 }) {
   const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
@@ -50,7 +53,8 @@ export function AccountMeters({
   const checked = !!observedAt && observedAt === checkedAt
   const fresh = limitWindows(c.provider, reading, now)
   const kept = limitWindows(c.provider, older, now).filter((w) => !SHARED_WINDOWS.has(w.id) && !fresh.some((f) => f.id === w.id))
-  const meters = [...fresh.map((w) => ({ w, at: observedAt, checked, kept: false })), ...kept.map((w) => ({ w, at: olderAt, checked: false, kept: true }))]
+  const all = [...fresh.map((w) => ({ w, at: observedAt, checked, kept: false })), ...kept.map((w) => ({ w, at: olderAt, checked: false, kept: true }))]
+  const meters = all.filter((m) => !hidden?.has(gaugeKey(c.provider, m.w.label)))
   const windows = meters.map((m) => m.w)
   const hold = reserveHold(c, reserve)
   // The caption goes on the limits that tripped the hold, or on all of them when none of them did.
@@ -62,14 +66,14 @@ export function AccountMeters({
   // whichever reading the meter shows.
   const fable = reserve?.fable?.[c.name]
   const fableHeld = fable && { label: fable.billing ? 'Paid extra usage' : 'Reserved', until: fable.until }
-  // Antigravity's limits are per model family, each held on its own (the 5-hour reserve).
-  const antigravity = c.provider === 'antigravity' ? reserve?.antigravity?.[c.name] : undefined
 
+  // Every gauge it has is left out.
+  if (!windows.length && all.length) return null
   if (!windows.length) {
     return (
       <p className={cn('text-xs text-muted-foreground', className)}>
         {c.provider === 'antigravity'
-          ? 'No reading yet. The console reads the quota of each model family within a few minutes.'
+          ? "No limits: CLIProxyAPI doesn't report Antigravity quotas, and the console doesn't ask Google for them."
           : ['claude', 'codex'].includes(c.provider)
             ? "No reading yet. Limits appear after this account's next request."
             : 'This provider does not report usage limits.'}
@@ -81,7 +85,6 @@ export function AccountMeters({
       {meters.map(({ w, at, checked, kept }) => {
         const id = RESERVE_WINDOWS[w.label]
         const isFable = c.provider === 'claude' && w.label === 'Fable'
-        const familyUntil = antigravity?.[w.label]
         return (
           <LimitMeter
             key={w.id}
@@ -90,8 +93,8 @@ export function AccountMeters({
             observedAt={at}
             checked={checked}
             older={kept}
-            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : c.provider === 'antigravity' ? reserve?.limits['5h'] : undefined}
-            held={held && heldOn(w) ? held : isFable ? fableHeld : familyUntil ? { label: 'Reserved', until: familyUntil } : undefined}
+            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : undefined}
+            held={held && heldOn(w) ? held : isFable ? fableHeld : undefined}
             detailed={detailed}
           />
         )

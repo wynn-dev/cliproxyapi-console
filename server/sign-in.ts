@@ -1,4 +1,3 @@
-import { antigravityAdded } from './antigravity.ts'
 import { type PoolAccount, availability } from './availability.ts'
 import { excludedModels, fableAdded } from './fable.ts'
 import type { ListedCredential } from './limits.ts'
@@ -361,9 +360,8 @@ async function finish(s: Session): Promise<Outcome> {
     // Smart order owns the file's priority.
     if (k === 'priority' && ordered) continue
     if (k === 'excluded_models') {
-      // Only the user's own entries; what the console excludes now (Fable, Antigravity families) stays as it is.
-      const added = [...fableAdded(s.name), ...antigravityAdded(s.name)]
-      const mine = (list: string[]) => list.filter((m) => !added.some((a) => a.toLowerCase() === m.toLowerCase()))
+      // Only the user's own entries; what the console excludes now (Fable) stays as it is.
+      const mine = (list: string[]) => list.filter((m) => !fableAdded(s.name).some((a) => a.toLowerCase() === m.toLowerCase()))
       const have = excludedModels(current)
       const want = mine(excludedModels({ excluded_models: v }))
       if (want.length && !mine(have).length) restored[k] = [...want, ...have]

@@ -63,6 +63,12 @@ export const queries = {
       queryFn: () => consoleApi<LimitChecks>('/limit-checks'),
       refetchInterval: 30_000,
     }),
+  /** Limit gauges the Overview leaves out, by gaugeKey. */
+  gauges: () =>
+    queryOptions({
+      queryKey: ['console', 'gauges'],
+      queryFn: () => consoleApi<{ hidden: string[] }>('/gauges'),
+    }),
   providerGroups: (provider: string) =>
     queryOptions({
       queryKey: ['mgmt', 'config', 'api-keys', provider],
@@ -104,6 +110,26 @@ export function useOrderWrite() {
     onMutate: () => qc.cancelQueries({ queryKey: queries.order().queryKey }),
     onSuccess: (status) => qc.setQueryData(queries.order().queryKey, status),
     onError: (err) => toast.error('Could not save', { description: err.message }),
+  })
+}
+
+/** Saves which limit gauges the Overview leaves out; shown at once, put back if saving fails. */
+export function useGaugesWrite() {
+  const qc = useQueryClient()
+  const key = queries.gauges().queryKey
+  return useMutation({
+    mutationFn: (hidden: string[]) => consoleApi<{ hidden: string[] }>('/gauges', { method: 'PUT', body: { hidden } }),
+    onMutate: async (hidden) => {
+      await qc.cancelQueries({ queryKey: key })
+      const before = qc.getQueryData(key)
+      qc.setQueryData(key, { hidden })
+      return { before }
+    },
+    onSuccess: (saved) => qc.setQueryData(key, saved),
+    onError: (err, _hidden, ctx) => {
+      qc.setQueryData(key, ctx?.before)
+      toast.error('Could not save', { description: err.message })
+    },
   })
 }
 

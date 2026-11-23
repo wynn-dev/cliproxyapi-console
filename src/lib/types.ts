@@ -204,8 +204,6 @@ export interface ReserveStatus {
   accounts: Record<string, ReserveHold>
   /** Accounts whose Fable models are held back, by credential file name. */
   fable: Record<string, FableHold>
-  /** Antigravity model families held back per account, by credential file name, then family label: when each is back (ms). */
-  antigravity?: Record<string, Record<string, number>>
   /** Accounts that look signed out but stay in rotation, by credential file name. */
   warnings: Record<string, SignInWarning>
 }

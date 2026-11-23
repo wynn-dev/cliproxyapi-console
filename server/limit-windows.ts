@@ -1,8 +1,12 @@
 /**
  * Usage limits per account, read from the rate-limit headers CPA last saw for it
- * (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex), or for Antigravity from the
- * console's own quota reading (`antigravity-<family>-*`, see limit-checks.ts). Shared by the server
- * (the account reserve) and the SPA, so it imports nothing.
+ * (`anthropic-ratelimit-unified-*` for Claude, `x-codex-*` for Codex). Shared by the server (the
+ * account reserve) and the SPA, so it imports nothing.
+ *
+ * Antigravity (Gemini subscriptions) has none. CPA learns no quota from its traffic, and the console
+ * does not ask Google for it: only the Antigravity app's own `fetchAvailableModels` reports it, and
+ * the console can only send that through CPA's api-call, whose HTTP client is not the one CPA's
+ * Antigravity requests use, so it would not look exactly like the app.
  */
 
 export interface LimitReading {
@@ -33,12 +37,6 @@ export type ReserveWindow = '5h' | 'weekly'
 /** The windows the account reserve covers, by the label limitWindows gives them. Model-scoped ones (Fable) are left to CPA. */
 export const RESERVE_WINDOWS: Partial<Record<string, ReserveWindow>> = { '5h': '5h', Weekly: 'weekly' }
 
-/**
- * The model families an Antigravity account has a quota for, by the first part of their model ids,
- * with their labels. Each family is one limit, as Antigravity groups them.
- */
-export const ANTIGRAVITY_FAMILIES: Record<string, string> = { gemini: 'Gemini', claude: 'Claude', gpt: 'GPT-OSS' }
-
 const CLAUDE_LABELS: Record<string, string> = { '5h': '5h', '7d': 'Weekly', '7d_oi': 'Fable' }
 
 function windowLabel(minutes: number | undefined, slot: string) {
@@ -49,6 +47,12 @@ function windowLabel(minutes: number | undefined, slot: string) {
 }
 
 const titleCase = (s: string) => s.replace(/(^|-)([a-z])/g, (_, sep: string, c: string) => (sep ? ' ' : '') + c.toUpperCase())
+
+/**
+ * A limit gauge the Overview can hide: one provider's limit by the label limitWindows gives it, for
+ * its accounts' meters and its total over the accounts alike.
+ */
+export const gaugeKey = (provider: string, label: string) => `${provider}:${label}`
 
 export const hasReading = (r: LimitReading | undefined): r is LimitReading => !!r && Object.keys(r.signals ?? {}).length > 0
 
@@ -99,13 +103,6 @@ export function limitWindows(provider: string, reading: LimitReading | undefined
         used: used / 100,
         resetsAt: resetAt ? resetAt * 1000 : resetAfter !== undefined ? observedAt + resetAfter * 1000 : undefined,
       })
-    }
-  } else if (provider === 'antigravity') {
-    for (const [family, label] of Object.entries(ANTIGRAVITY_FAMILIES)) {
-      const left = num(s[`antigravity-${family}-remaining`])
-      if (left === undefined) continue
-      const reset = num(s[`antigravity-${family}-reset`])
-      add({ id: family, label, used: 1 - left, resetsAt: reset ? reset * 1000 : undefined })
     }
   }
   return out

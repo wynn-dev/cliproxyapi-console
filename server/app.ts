@@ -14,7 +14,6 @@ import { insights } from './insights.ts'
 import { limitHistory } from './limit-history.ts'
 import { limitCheckStatus, setLimitChecks, useLimitReset } from './limit-checks.ts'
 import { limitReadings } from './limits.ts'
-import { antigravityStatus } from './antigravity.ts'
 import { fableStatus } from './fable.ts'
 import { apiKeyStatus, setBalance, setFallback } from './fallback.ts'
 import { orderStatus, setOrderEnabled, setOwnPriority } from './order.ts'
@@ -228,7 +227,7 @@ app.get('/console/api/limits/history', (c) => {
 app.route('/console/api/insights', insights)
 app.route('/console/api/share', share)
 
-const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), antigravity: antigravityStatus(), warnings: signInWarnings() })
+const holdStatus = () => ({ ...reserveStatus(), fable: fableStatus(), warnings: signInWarnings() })
 
 app.get('/console/api/reserve', (c) => c.json(holdStatus()))
 
@@ -239,6 +238,21 @@ app.put('/console/api/limit-checks', async (c) => {
   if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled must be true or false' }, 400)
   setLimitChecks(body.enabled)
   return c.json(limitCheckStatus())
+})
+
+// Which limit gauges the Overview shows. Display only.
+const gauges = () => ({ hidden: readState().hiddenGauges ?? [] })
+
+app.get('/console/api/gauges', (c) => c.json(gauges()))
+
+app.put('/console/api/gauges', async (c) => {
+  const body: { hidden?: unknown } = await c.req.json().catch(() => ({}))
+  const hidden = body.hidden
+  if (!Array.isArray(hidden) || hidden.length > 200 || !hidden.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 200)) {
+    return c.json({ error: 'hidden must be a list of gauge names' }, 400)
+  }
+  updateState({ hiddenGauges: [...new Set(hidden as string[])] })
+  return c.json(gauges())
 })
 
 // Uses a Claude account's weekly limit reset, or one of its Fable resets. Only on the user's own click; nothing else calls it.

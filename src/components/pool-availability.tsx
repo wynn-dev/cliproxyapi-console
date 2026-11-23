@@ -6,7 +6,7 @@ import { reserveHold, useTicker } from '@/components/credentials/lib'
 import { Countdown } from '@/components/credentials/status'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { type Availability, type ProviderAvailability, availability, poolAvailability } from '@/lib/availability'
+import { type Availability, type ProviderAvailability, availability, poolAvailability, turnedOff } from '@/lib/availability'
 import { providerLabel } from '@/lib/providers'
 import { queries } from '@/lib/queries'
 import type { ReserveStatus } from '@/lib/types'
@@ -19,7 +19,6 @@ const REASONS: { state: Exclude<Availability, 'available'>; label: (n: number) =
   { state: 'extra-usage', label: (n) => `${n} held back because ${n === 1 ? 'it is' : 'they are'} using paid extra usage` },
   { state: 'signed-out', label: (n) => `${n} signed out` },
   { state: 'cooling', label: (n) => `${n} cooling down after errors` },
-  { state: 'disabled', label: (n) => `${n} turned off` },
 ]
 
 /** How many accounts per provider can take requests, and what to do when none can. */
@@ -27,8 +26,9 @@ export function PoolAvailability({ running }: { running: boolean }) {
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const now = useTicker(running, 5_000)
-  const files = credentials.data?.files ?? []
-  if (!running || !files.length) return null
+  // Accounts turned off by hand aren't counted; which ones the console turned off is known once the reserve is in.
+  const files = (credentials.data?.files ?? []).filter((f) => !turnedOff(f, reserveHold(f, reserve.data)))
+  if (!running || reserve.isPending || !files.length) return null
 
   const byName = new Map(files.map((f) => [f.name, f]))
   const holdOf = (name: string) => {
@@ -89,7 +89,6 @@ function EmptyPool({ pool: p, reserve }: { pool: ProviderAvailability; reserve?:
     )
   }
   if (held['signed-out']) todo.push('Open a signed-out account on Credentials and sign in again.')
-  if (held.disabled) todo.push('Enable an account you turned off.')
   if (held['extra-usage'] && todo.length === 0) todo.push('These come back when their limits reset; enabling them bills their owners.')
   if (held.cooling && todo.length === 0) todo.push('CLIProxyAPI tries them again when their cooldown ends.')
 

@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
+import { turnedOff } from '@/lib/availability'
 import { fmtAgo } from '@/lib/format'
 import { accountReadings, gaugeKey, limitWindows, poolLimits } from '@/lib/limits'
 import { providerLabel } from '@/lib/providers'
@@ -41,7 +42,9 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const hiddenList = useQuery({ ...queries.gauges(), enabled: running }).data?.hidden
   const hidden = new Set(hiddenList)
-  const accounts = [...(credentials.data?.files ?? [])].sort(byRoutingOrder)
+  const files = credentials.data?.files ?? []
+  // Accounts turned off by hand stay on Credentials; which ones the console turned off is known once the reserve is in.
+  const accounts = files.filter((c) => !turnedOff(c, reserveHold(c, reserve.data))).sort(byRoutingOrder)
   const routing = routingOf(config.data)
   const scattered = hasAccountPool(accounts) && !keepsCachesWarm(routing)
   const setOpen = useAccountParam(account, credentials.data?.files)
@@ -87,16 +90,16 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
       <CardContent>
         {!running ? (
           <Empty>Start CLIProxyAPI to see your accounts.</Empty>
-        ) : credentials.isPending ? (
+        ) : credentials.isPending || reserve.isPending ? (
           <div className="space-y-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
         ) : accounts.length === 0 ? (
           <Empty>
-            No accounts yet.{' '}
+            {files.length ? 'Every account is turned off.' : 'No accounts yet.'}{' '}
             <Link to="/credentials" className="text-foreground underline underline-offset-4">
-              Add one
+              {files.length ? 'Manage them' : 'Add one'}
             </Link>
           </Empty>
         ) : (
@@ -150,8 +153,9 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
           </>
         )}
       </CardContent>
+      {/* From all accounts, so the panel stays open when its account is turned off there. */}
       <CredentialSheet
-        credential={accounts.find((c) => c.name === account) ?? null}
+        credential={files.find((c) => c.name === account) ?? null}
         focusEdit={false}
         onOpenChange={(o) => !o && setOpen()}
         onShowModels={setModelsFor}

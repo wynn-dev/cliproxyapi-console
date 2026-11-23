@@ -23,13 +23,21 @@ export interface PoolHold {
 
 export function availability(a: PoolAccount, hold: PoolHold | undefined, now: number): { state: Availability; until?: number } {
   if (hold) return { state: hold.reason === 'reserve' ? 'reserved' : hold.reason, until: hold.until || undefined }
-  if (a.disabled || a.status === 'disabled') return { state: 'disabled' }
+  if (turnedOff(a, hold)) return { state: 'disabled' }
   // Cooling down as a whole (a model-only cooldown leaves the account usable), or failing.
   if (a.unavailable || a.status === 'error') {
     const retry = Date.parse(a.next_retry_after ?? '')
     return { state: 'cooling', until: retry > now ? retry : undefined }
   }
   return { state: 'available' }
+}
+
+/**
+ * Turned off by hand rather than held back by the console. The Overview leaves these out of its list
+ * and counts; Credentials still lists them.
+ */
+export function turnedOff(a: PoolAccount, hold: PoolHold | undefined) {
+  return !hold && (!!a.disabled || a.status === 'disabled')
 }
 
 export interface ProviderAvailability {

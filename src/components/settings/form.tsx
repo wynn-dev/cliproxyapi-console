@@ -1,8 +1,7 @@
-import { RotateCcwIcon, SaveIcon } from 'lucide-react'
+import { Hint } from '@/components/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -12,6 +11,10 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { FieldSpec, SectionForm } from './form-state'
 
+/**
+ * A settings section: its title with the explanation in a hover, then its rows. Reset and Save show
+ * once something changed; the footer note is state the person needs now, so it stays visible.
+ */
 export function SectionCard({
   title,
   description,
@@ -28,31 +31,26 @@ export function SectionCard({
   footerNote?: React.ReactNode
 }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-        {form.dirty && (
-          <CardAction>
-            <UnsavedBadge />
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent>{form.loaded ? <FieldGroup>{children}</FieldGroup> : <FormSkeleton />}</CardContent>
-      <CardFooter className="justify-between gap-3">
-        <div className="text-xs text-muted-foreground">{footerNote}</div>
-        <div className="flex gap-2">
+    <section data-slot="settings-section" aria-label={title} className="space-y-4">
+      <header className="flex min-h-8 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h2 className="text-base font-semibold">{title}</h2>
+          <Hint label={`About ${title}`}>{description}</Hint>
+        </div>
+        <div className={cn('flex items-center gap-1.5 transition-opacity', !form.dirty && 'pointer-events-none opacity-0')} aria-hidden={!form.dirty}>
+          <UnsavedBadge className="max-sm:hidden" />
           <Button variant="ghost" size="sm" disabled={!form.dirty || form.saving} onClick={form.reset}>
-            <RotateCcwIcon />
             Reset
           </Button>
           <Button size="sm" disabled={!form.dirty || !form.valid || form.saving} onClick={onSave ?? (() => void form.save())}>
-            {form.saving ? <Spinner /> : <SaveIcon />}
+            {form.saving && <Spinner />}
             Save
           </Button>
         </div>
-      </CardFooter>
-    </Card>
+      </header>
+      {footerNote && <p className="-mt-2 text-xs text-muted-foreground">{footerNote}</p>}
+      {form.loaded ? <FieldGroup>{children}</FieldGroup> : <FormSkeleton />}
+    </section>
   )
 }
 
@@ -83,16 +81,20 @@ function FormSkeleton() {
 
 const fieldId = (path: string) => `setting-${path.replaceAll('.', '-')}`
 
-function FieldLabelText({ form, path, label }: { form: SectionForm; path: string; label: React.ReactNode }) {
+/** The row's title, with its explanation in a hover beside it. */
+function FieldLabelText({ form, path, label, description }: { form: SectionForm; path: string; label: React.ReactNode; description: React.ReactNode }) {
   return (
-    <FieldLabel htmlFor={fieldId(path)}>
-      {label}
-      {form.isDirty(path) && (
-        <span className="size-1.5 rounded-full bg-warning" title="Modified">
-          <span className="sr-only">(modified)</span>
-        </span>
-      )}
-    </FieldLabel>
+    <div className="flex items-center gap-1.5">
+      <FieldLabel htmlFor={fieldId(path)}>
+        {label}
+        {form.isDirty(path) && (
+          <span className="size-1.5 rounded-full bg-warning" title="Modified">
+            <span className="sr-only">(modified)</span>
+          </span>
+        )}
+      </FieldLabel>
+      <Hint label={typeof label === 'string' ? `About ${label}` : undefined}>{description}</Hint>
+    </div>
   )
 }
 
@@ -109,8 +111,7 @@ export function SwitchField({ form, path, label, description, disabled, children
   return (
     <Field orientation="horizontal" data-disabled={disabled || undefined}>
       <FieldContent>
-        <FieldLabelText form={form} path={path} label={label} />
-        <FieldDescription>{description}</FieldDescription>
+        <FieldLabelText form={form} path={path} label={label} description={description} />
         {children}
       </FieldContent>
       <Switch id={fieldId(path)} checked={form.value(path) === true} disabled={disabled} onCheckedChange={(v) => form.set(path, v)} />
@@ -136,8 +137,7 @@ export function NumberField({ form, path, label, description, unit, disabled }: 
   return (
     <Field orientation="responsive" data-invalid={!!err || undefined} data-disabled={disabled || undefined}>
       <FieldContent>
-        <FieldLabelText form={form} path={path} label={label} />
-        <FieldDescription>{description}</FieldDescription>
+        <FieldLabelText form={form} path={path} label={label} description={description} />
         <FieldError>{err}</FieldError>
       </FieldContent>
       <InputGroup className="@md/field-group:w-36!">
@@ -167,8 +167,7 @@ export function TextField({
   return (
     <Field orientation="responsive" data-invalid={!!err || undefined} data-disabled={disabled || undefined}>
       <FieldContent>
-        <FieldLabelText form={form} path={path} label={label} />
-        <FieldDescription>{description}</FieldDescription>
+        <FieldLabelText form={form} path={path} label={label} description={description} />
         <FieldError>{err}</FieldError>
       </FieldContent>
       <Input
@@ -196,8 +195,7 @@ export function SelectField({
   return (
     <Field orientation="responsive">
       <FieldContent>
-        <FieldLabelText form={form} path={path} label={label} />
-        <FieldDescription>{description}</FieldDescription>
+        <FieldLabelText form={form} path={path} label={label} description={description} />
       </FieldContent>
       <Select value={String(form.value(path))} onValueChange={(v) => form.set(path, v)}>
         <SelectTrigger id={fieldId(path)} className="@md/field-group:w-56!">

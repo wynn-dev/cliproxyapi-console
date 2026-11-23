@@ -1,8 +1,9 @@
-import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
-import { useState } from 'react'
+import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, InfoIcon } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { copyText } from '@/lib/clipboard'
@@ -136,5 +137,48 @@ export function RequestSparkline({ buckets, className }: { buckets: { success: n
         )
       })}
     </div>
+  )
+}
+
+/**
+ * An explanation kept out of the way: an info mark that shows it on hover, focus or tap, so a screen
+ * at rest is titles and controls.
+ */
+export function Hint({ children, label = 'What is this?', className }: { children: React.ReactNode; label?: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Moving from the mark to the text crosses a gap; wait a moment before closing.
+  const hover = (on: boolean) => {
+    clearTimeout(timer.current)
+    if (on) setOpen(true)
+    else timer.current = setTimeout(() => setOpen(false), 120)
+  }
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className={cn(
+            'inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:text-foreground',
+            className,
+          )}
+          onMouseEnter={() => hover(true)}
+          onMouseLeave={() => hover(false)}
+        >
+          <InfoIcon className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        className="w-80 gap-1.5 text-xs leading-relaxed text-muted-foreground [&_strong]:text-foreground"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onMouseEnter={() => hover(true)}
+        onMouseLeave={() => hover(false)}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
   )
 }

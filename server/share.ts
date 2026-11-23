@@ -5,7 +5,7 @@ import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { paths } from './env.ts'
 import { readState, updateState } from './state.ts'
-import { db, usageSummary } from './usage.ts'
+import { db, usageSummary, withUsageRows } from './usage.ts'
 
 /** Share card: a summary of a time range and the PNG snapshots the browser renders of it. Mounted behind auth. */
 export const share = new Hono()
@@ -49,22 +49,26 @@ export function clientName(userAgent: string) {
 export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
   const s = usageSummary({ from, to }, 0)
   const t = s.totals
-  // Straight from the attempts: usageSummary's breakdowns keep the 50 rows with the most requests.
-  const models = db
-    .prepare("SELECT model, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND model != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
-    .all(from, to) as { model: string; tokens: number }[]
-  // By auth_index, most tokens first. The browser resolves names, or masks them.
-  const accounts = db
-    .prepare("SELECT auth_index AS key, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND auth_index != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC")
-    .all(from, to) as { key: string; tokens: number }[]
-  // Tokens per hour, hours with traffic only; the browser adds them up by its own calendar days.
+  // Not from usageSummary's breakdowns, which keep the 50 rows with the most requests. Attempts' tokens
+  // under their own model, account, provider and client.
   const shift = BigInt((((-tzOffsetMin % 60) + 60) % 60) * 60_000)
-  const hours = db
-    .prepare('SELECT ((ts + ?) / ?) * ? - ? AS t, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? GROUP BY 1 ORDER BY 1')
-    .all(shift, BigInt(HOUR), BigInt(HOUR), shift, from, to) as { t: number; tokens: number }[]
-  const providers = db
-    .prepare("SELECT provider AS name, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND provider != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
-    .all(from, to) as { name: string; tokens: number }[]
+  const { models, accounts, hours, providers, agents } = withUsageRows({ from, to }, () => ({
+    models: db
+      .prepare("SELECT model, TOTAL(total) AS tokens FROM usage_rows WHERE model != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
+      .all() as { model: string; tokens: number }[],
+    // By auth_index, most tokens first. The browser resolves names, or masks them.
+    accounts: db
+      .prepare("SELECT auth_index AS key, TOTAL(total) AS tokens FROM usage_rows WHERE auth_index != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC")
+      .all() as { key: string; tokens: number }[],
+    // Tokens per hour, hours with traffic only; the browser adds them up by its own calendar days.
+    hours: db
+      .prepare('SELECT ((slot + ?) / ?) * ? - ? AS t, TOTAL(total) AS tokens FROM usage_rows WHERE away = 0 GROUP BY 1 ORDER BY 1')
+      .all(shift, BigInt(HOUR), BigInt(HOUR), shift) as { t: number; tokens: number }[],
+    providers: db
+      .prepare("SELECT provider AS name, TOTAL(total) AS tokens FROM usage_rows WHERE provider != '' GROUP BY 1 HAVING tokens > 0 ORDER BY 2 DESC LIMIT 5")
+      .all() as { name: string; tokens: number }[],
+    agents: db.prepare("SELECT user_agent AS ua, TOTAL(total) AS tokens FROM usage_rows WHERE user_agent != '' GROUP BY 1").all() as { ua: string; tokens: number }[],
+  }))
   // Conversations: CPA's session ids, one row each. Requests are client requests, not attempts; a
   // Codex websocket session keeps one request_id for all its turns, so its successes count instead.
   const conversations = db
@@ -82,9 +86,6 @@ export function shareSummary(from: number, to: number, tzOffsetMin = 0) {
     if (!l || c.requests > l.requests || (c.requests === l.requests && c.tokens > l.tokens)) sessions.longest = { requests: c.requests, tokens: c.tokens, ms: c.ms }
   }
   const clients = new Map<string, number>()
-  const agents = db
-    .prepare("SELECT user_agent AS ua, TOTAL(total_tokens) AS tokens FROM requests WHERE ts >= ? AND ts < ? AND user_agent != '' GROUP BY 1")
-    .all(from, to) as { ua: string; tokens: number }[]
   for (const a of agents) {
     const name = clientName(a.ua)
     if (name && a.tokens > 0) clients.set(name, (clients.get(name) ?? 0) + a.tokens)

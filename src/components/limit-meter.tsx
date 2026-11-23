@@ -21,6 +21,13 @@ function fmtUntil(ms: number) {
  */
 const SHARED_WINDOWS = new Set(['5h', '7d', ':primary', ':secondary'])
 
+/** An account's limits: those of its newest reading, and model-scoped ones kept from an older one. */
+export function accountWindows(provider: string, reading: LimitReading | undefined, older: LimitReading | undefined, now: number) {
+  const fresh = limitWindows(provider, reading, now)
+  const kept = limitWindows(provider, older, now).filter((w) => !SHARED_WINDOWS.has(w.id) && !fresh.some((f) => f.id === w.id))
+  return { fresh, kept }
+}
+
 /** An account's limit meters, captioned with the reserve hold when there is one. */
 export function AccountMeters({
   account: c,
@@ -31,6 +38,7 @@ export function AccountMeters({
   now,
   detailed,
   hidden,
+  columns,
   className,
 }: {
   account: Credential
@@ -45,14 +53,15 @@ export function AccountMeters({
   detailed?: boolean
   /** Gauges left out, by gaugeKey (the Overview's choice). */
   hidden?: ReadonlySet<string>
+  /** Lay the meters out as table cells, one per limit label in this order, each on one line. */
+  columns?: string[]
   className?: string
 }) {
   const observedAt = reading?.observed_at ? Date.parse(reading.observed_at) : undefined
   const olderAt = older?.observed_at ? Date.parse(older.observed_at) : undefined
   // A check stores its reading with its own time, so equal times mean the reading came from it.
   const checked = !!observedAt && observedAt === checkedAt
-  const fresh = limitWindows(c.provider, reading, now)
-  const kept = limitWindows(c.provider, older, now).filter((w) => !SHARED_WINDOWS.has(w.id) && !fresh.some((f) => f.id === w.id))
+  const { fresh, kept } = accountWindows(c.provider, reading, older, now)
   const all = [...fresh.map((w) => ({ w, at: observedAt, checked, kept: false })), ...kept.map((w) => ({ w, at: olderAt, checked: false, kept: true }))]
   const meters = all.filter((m) => !hidden?.has(gaugeKey(c.provider, m.w.label)))
   const windows = meters.map((m) => m.w)
@@ -67,11 +76,11 @@ export function AccountMeters({
   const fable = reserve?.fable?.[c.name]
   const fableHeld = fable && { label: fable.billing ? 'Paid extra usage' : 'Reserved', until: fable.until }
 
-  // Every gauge it has is left out.
-  if (!windows.length && all.length) return null
+  // Every gauge it has is left out: blank cells in a table, nothing otherwise.
+  if (!windows.length && all.length) return columns ? columns.map((label) => <span key={label} aria-hidden className="max-md:hidden" />) : null
   if (!windows.length) {
     return (
-      <p className={cn('text-xs text-muted-foreground', className)}>
+      <p className={cn('text-xs text-muted-foreground', columns && 'col-span-full self-center', className)}>
         {c.provider === 'antigravity'
           ? "No limits: CLIProxyAPI doesn't report Antigravity quotas, and the console doesn't ask Google for them."
           : ['claude', 'codex'].includes(c.provider)
@@ -80,34 +89,38 @@ export function AccountMeters({
       </p>
     )
   }
-  return (
-    <div className={cn('grid grid-cols-2 gap-x-6 gap-y-3', className)}>
-      {meters.map(({ w, at, checked, kept }) => {
-        const id = RESERVE_WINDOWS[w.label]
-        const isFable = c.provider === 'claude' && w.label === 'Fable'
-        return (
-          <LimitMeter
-            key={w.id}
-            window={w}
-            now={now}
-            observedAt={at}
-            checked={checked}
-            older={kept}
-            reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : undefined}
-            held={held && heldOn(w) ? held : isFable ? fableHeld : undefined}
-            detailed={detailed}
-          />
-        )
-      })}
-    </div>
-  )
+  const meter = ({ w, at, checked, kept }: (typeof meters)[number]) => {
+    const id = RESERVE_WINDOWS[w.label]
+    const isFable = c.provider === 'claude' && w.label === 'Fable'
+    return (
+      <LimitMeter
+        key={w.id}
+        window={w}
+        now={now}
+        observedAt={at}
+        checked={checked}
+        older={kept}
+        reserve={id ? reserve?.limits[id] : isFable ? reserve?.limits.fable : undefined}
+        held={held && heldOn(w) ? held : isFable ? fableHeld : undefined}
+        detailed={detailed}
+        inline={!!columns}
+      />
+    )
+  }
+  if (columns) {
+    return columns.map((label) => {
+      const m = meters.find((x) => x.w.label === label)
+      return m ? meter(m) : <span key={label} aria-hidden className="max-md:hidden" />
+    })
+  }
+  return <div className={cn('grid grid-cols-2 gap-x-6 gap-y-3', className)}>{meters.map(meter)}</div>
 }
 
 // The track is a lighter step of the fill's own color, so the state reads across the whole bar.
 const METER_TONE = {
-  ok: { track: 'bg-chart-1/15', fill: 'bg-chart-1' },
-  warning: { track: 'bg-warning/25', fill: 'bg-warning' },
-  exhausted: { track: 'bg-critical/20', fill: 'bg-critical' },
+  ok: { track: 'bg-foreground/8', fill: 'bg-meter' },
+  warning: { track: 'bg-foreground/8', fill: 'bg-warning' },
+  exhausted: { track: 'bg-critical/15', fill: 'bg-critical' },
 }
 
 function LimitMeter({
@@ -119,6 +132,7 @@ function LimitMeter({
   reserve,
   held,
   detailed,
+  inline,
 }: {
   window: LimitWindow
   now: number
@@ -132,6 +146,8 @@ function LimitMeter({
   /** The console holds the account back because of this limit. */
   held?: { label: string; until: number }
   detailed?: boolean
+  /** One line, for a table cell: percent, bar, then the reset or hold. */
+  inline?: boolean
 }) {
   const pct = Math.round(w.left * 100)
   const tone = METER_TONE[w.level]
@@ -149,10 +165,32 @@ function LimitMeter({
     resets
   )
 
+  const short = held ? (
+    <>
+      {held.label === 'Reserved' ? 'Held' : held.label} <Countdown until={held.until} endLabel="a moment" />
+    </>
+  ) : w.reset ? (
+    'Reset'
+  ) : w.resetsAt ? (
+    fmtUntil(w.resetsAt - now)
+  ) : undefined
+  const trigger = inline ? (
+    <div className="flex min-w-0 cursor-default items-center gap-2 text-[0.8rem]" role="meter" aria-label={`${w.label} limit left`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+      <span className="w-14 shrink-0 text-muted-foreground md:hidden">{w.label}</span>
+      <span className={cn('w-8 shrink-0 font-medium tabular', w.level === 'exhausted' && 'text-critical')}>{pct}%</span>
+      <div className="relative min-w-8 flex-1">
+        <div className={cn('h-1 overflow-hidden rounded-[1px]', tone.track)}>
+          <div className={cn('h-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 2 : 0 }} />
+        </div>
+        {!!reserve && <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />}
+      </div>
+      <span className={cn('w-[4.5rem] shrink-0 truncate text-xs tabular', held ? 'font-medium text-foreground' : 'text-muted-foreground')}>{short}</span>
+    </div>
+  ) : undefined
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${w.label} limit left`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        {trigger ?? <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${w.label} limit left`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="truncate text-muted-foreground">{w.label}</span>
             <span className="font-medium tabular">
@@ -160,11 +198,11 @@ function LimitMeter({
             </span>
           </div>
           <div className="relative">
-            <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
-              <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
+            <div className={cn('h-1 overflow-hidden rounded-[1px]', tone.track)}>
+              <div className={cn('h-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 2 : 0 }} />
             </div>
             {!!reserve && (
-              <div aria-hidden className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70 ring-1 ring-card" style={{ left: `${reserve}%` }} />
+              <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />
             )}
           </div>
           <div className={cn('text-[11px] first-letter:uppercase', held ? 'font-medium text-foreground' : 'text-muted-foreground')}>{caption ?? ' '}</div>
@@ -175,7 +213,7 @@ function LimitMeter({
               {older && observedAt && <div>Reported {fmtAgo(observedAt)}</div>}
             </div>
           )}
-        </div>
+        </div>}
       </TooltipTrigger>
       <TooltipContent>
         <div className="font-medium">
@@ -196,7 +234,7 @@ function LimitMeter({
 }
 
 /** One of a provider's limits (weekly, or Claude's Fable) added up over its accounts, as one meter. */
-export function PoolMeter({ pool: p, reserve, now }: { pool: PoolLimit; reserve?: number; now: number }) {
+export function PoolMeter({ pool: p, reserve, now, inline }: { pool: PoolLimit; reserve?: number; now: number; inline?: boolean }) {
   const share = p.left / p.accounts
   const pct = Math.round(share * 100)
   const tone = METER_TONE[share <= 0 ? 'exhausted' : share <= 0.2 ? 'warning' : 'ok']
@@ -207,10 +245,25 @@ export function PoolMeter({ pool: p, reserve, now }: { pool: PoolLimit; reserve?
   const gain = p.nextReset && Math.round((p.nextReset.gain / p.accounts) * 100)
   const reset = p.nextReset && `next reset in ${fmtUntil(p.nextReset.at - now)}${gain ? `, +${gain}%` : ''}`
 
+  const trigger = inline ? (
+    <div className="flex min-w-0 cursor-default items-center gap-2 text-[0.8rem]" role="meter" aria-label={`${providerLabel(p.provider)} ${limit} limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+      <span className="w-14 shrink-0 text-muted-foreground md:hidden">{p.label}</span>
+      <span className="w-8 shrink-0 font-medium tabular">{pct}%</span>
+      <div className="relative min-w-8 flex-1">
+        <div className={cn('h-1 overflow-hidden rounded-[1px]', tone.track)}>
+          <div className={cn('h-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 2 : 0 }} />
+        </div>
+        {!!reserve && <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />}
+      </div>
+      <span className="w-[4.5rem] shrink-0 truncate text-xs text-muted-foreground tabular">
+        {p.nextReset ? fmtUntil(p.nextReset.at - now) : ''}
+      </span>
+    </div>
+  ) : undefined
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${providerLabel(p.provider)} ${limit} limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        {trigger ?? <div className="min-w-0 cursor-default space-y-1.5" role="meter" aria-label={`${providerLabel(p.provider)} ${limit} limit left, all accounts`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
           <div className="flex items-baseline justify-between gap-2 text-xs">
             <span className="truncate text-muted-foreground">
               <span className="font-medium text-foreground">{name}</span> · {p.accounts} accounts
@@ -220,15 +273,15 @@ export function PoolMeter({ pool: p, reserve, now }: { pool: PoolLimit; reserve?
             </span>
           </div>
           <div className="relative">
-            <div className={cn('h-1.5 overflow-hidden rounded-full', tone.track)}>
-              <div className={cn('h-full rounded-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 4 : 0 }} />
+            <div className={cn('h-1 overflow-hidden rounded-[1px]', tone.track)}>
+              <div className={cn('h-full', tone.fill)} style={{ width: `${pct}%`, minWidth: pct > 0 ? 2 : 0 }} />
             </div>
             {!!reserve && (
-              <div aria-hidden className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70 ring-1 ring-card" style={{ left: `${reserve}%` }} />
+              <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />
             )}
           </div>
           <div className="text-[11px] text-muted-foreground first-letter:uppercase">{reset ?? ' '}</div>
-        </div>
+        </div>}
       </TooltipTrigger>
       <TooltipContent className="max-w-72">
         <div className="font-medium">

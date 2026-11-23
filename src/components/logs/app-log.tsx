@@ -233,18 +233,19 @@ const LogRow = memo(function LogRow({
 }) {
   const style = line.level && LEVEL_STYLE[line.level]
   return (
-    <div className={cn('flex gap-3 px-3 hover:bg-foreground/5', style?.row)}>
+    <div className={cn('flex gap-3 px-3 hover:bg-foreground/5 max-sm:gap-2', style?.row)}>
       <span className="w-15 shrink-0 text-muted-foreground tabular" title={line.date && `${line.date} ${line.time}`}>
         {line.time}
       </span>
-      <span className="w-12 shrink-0">
+      <span className="w-12 shrink-0 max-sm:w-9">
         {style && (
-          <span className={cn('inline-block w-full rounded-sm text-center text-[10px] leading-4 font-medium uppercase', style.badge)}>
+          <span className={cn('inline-block w-full text-[10px] leading-4 font-medium uppercase', style.badge)}>
             {line.level}
           </span>
         )}
       </span>
-      <span className="w-16 shrink-0">
+      {/* Phones keep the room for the message; the request filter is a desktop tool. */}
+      <span className="w-16 shrink-0 max-sm:hidden">
         {line.reqId && (
           <button
             type="button"

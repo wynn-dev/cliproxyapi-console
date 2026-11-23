@@ -2,10 +2,10 @@ export const LEVELS = ['debug', 'info', 'warn', 'error'] as const
 export type Level = (typeof LEVELS)[number]
 
 export const LEVEL_STYLE: Record<Level, { label: string; dot: string; badge: string; row?: string }> = {
-  debug: { label: 'Debug', dot: 'bg-muted-foreground/60', badge: 'bg-muted-foreground/10 text-muted-foreground' },
-  info: { label: 'Info', dot: 'bg-chart-1', badge: 'bg-chart-1/10 text-chart-1' },
-  warn: { label: 'Warn', dot: 'bg-warning', badge: 'bg-warning/15 text-foreground/80', row: 'bg-warning/5' },
-  error: { label: 'Error', dot: 'bg-critical', badge: 'bg-critical/10 text-critical', row: 'bg-critical/5' },
+  debug: { label: 'Debug', dot: 'bg-muted-foreground/60', badge: 'text-muted-foreground' },
+  info: { label: 'Info', dot: 'bg-muted-foreground', badge: 'text-muted-foreground' },
+  warn: { label: 'Warn', dot: 'bg-warning', badge: 'text-warning', row: 'bg-warning/5' },
+  error: { label: 'Error', dot: 'bg-critical', badge: 'text-critical', row: 'bg-critical/5' },
 }
 
 export interface LogLine {

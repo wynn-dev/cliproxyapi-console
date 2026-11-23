@@ -7,7 +7,6 @@ import { CopyButton, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { AccountMeters } from '@/components/limit-meter'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -129,13 +128,12 @@ function SheetBody({
           <SheetTitle className="truncate text-lg">{accountName(c)}</SheetTitle>
           <SheetDescription className="truncate font-mono text-xs">{c.name}</SheetDescription>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary">{providerLabel(c.provider)}</Badge>
-          {c.id_token?.plan_type && <Badge variant="outline" className="capitalize">{c.id_token.plan_type}</Badge>}
-          <Badge variant="outline" className="gap-1.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.84rem]">
+          <span className="inline-flex items-center gap-2">
             <StatusDot tone={signedOut ? 'bad' : meta.tone} />
             {hold && !hold.overridden ? holdLabel(hold) : meta.label}
-          </Badge>
+          </span>
+          <span className="text-muted-foreground capitalize">{[providerLabel(c.provider), c.id_token?.plan_type].filter(Boolean).join(' · ')}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="mr-1 flex items-center gap-2 text-sm">
@@ -256,7 +254,7 @@ function SheetBody({
                   </Button>
                 </div>
                 {(c.cooldowns?.length ?? 0) > 0 && (
-                  <ul className="divide-y rounded-lg border">
+                  <ul className="divide-y border-y">
                     {c.cooldowns!.map((cd, i) => (
                       <li key={i} className="flex items-center gap-3 px-3 py-2 text-sm">
                         <div className="min-w-0 flex-1">
@@ -296,7 +294,7 @@ function SheetBody({
                 <ChevronRightIcon className="size-3.5 transition-transform group-open:rotate-90" />
                 Raw headers
               </summary>
-              <dl className="mt-2 divide-y rounded-lg border">
+              <dl className="mt-2 divide-y border-y">
                 {signals.map(([k, v]) => (
                   <div key={k} className="flex items-center justify-between gap-4 px-3 py-1.5">
                     <dt className="truncate font-mono text-muted-foreground">{k}</dt>
@@ -378,12 +376,12 @@ function OrderNote({ placement, affinity }: { placement: OrderPlacement; affinit
   const now = useTicker(!!placement.weeklyResetsAt, 60_000)
   const reason = orderReason(placement, now, affinity)
   return (
-    <div className="-mt-1 space-y-0.5 rounded-lg border px-3 py-2 text-xs text-muted-foreground">
+    <div className="-mt-1 space-y-0.5 text-xs text-muted-foreground">
       <p>
         <span className="font-medium text-foreground">{reason.title}.</span> {reason.detail}
       </p>
       <p>
-        <Link to="/settings" search={{ section: 'routing' }} className="underline underline-offset-4 hover:text-foreground">
+        <Link to="/settings" search={{ section: 'routing' }} className="text-link hover:underline">
           Smart account order
         </Link>{' '}
         sorts accounts with the same priority, so CPA sees priority {placement.effective}.

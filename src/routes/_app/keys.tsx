@@ -67,7 +67,7 @@ function ClientKeys() {
         description={
           <>
             Keys your tools use to call the proxy. The{' '}
-            <Link to="/connect" className="text-foreground underline underline-offset-4">
+            <Link to="/connect" className="text-link hover:underline">
               Connect
             </Link>{' '}
             page has ready-to-run setup for each key.
@@ -139,7 +139,7 @@ function KeysCard({ keys, loading, onDelete }: { keys: string[]; loading: boolea
         {loading ? (
           <Skeleton className="h-24 w-full" />
         ) : keys.length === 0 ? (
-          <Empty className="border py-10">
+          <Empty className="py-10">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <KeyRoundIcon />

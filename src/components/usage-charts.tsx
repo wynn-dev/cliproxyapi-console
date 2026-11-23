@@ -20,7 +20,7 @@ function timeAxis(series: UsagePoint[], bucketMs: number) {
 }
 
 const requestsConfig = {
-  ok: { label: 'Succeeded', color: 'var(--chart-1)' },
+  ok: { label: 'Succeeded', color: 'var(--meter)' },
   failed: { label: 'Failed', color: 'var(--critical)' },
   turnedAway: { label: 'Turned away', color: 'var(--warning)' },
 } satisfies ChartConfig
@@ -31,7 +31,7 @@ export function RequestsChart({ series, bucketMs, className }: { series: UsagePo
   const anyTurnedAway = series.some((p) => p.turnedAway > 0)
   return (
     <ChartContainer config={requestsConfig} className={className ?? 'aspect-auto h-64 w-full'}>
-      <BarChart data={data} barCategoryGap="15%" maxBarSize={24} margin={{ left: 0, right: 0, top: 4 }}>
+      <BarChart data={data} barCategoryGap="28%" maxBarSize={14} margin={{ left: 0, right: 0, top: 4 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="t" tickLine={false} axisLine={false} minTickGap={40} {...timeAxis(series, bucketMs)} />
         <YAxis tickLine={false} axisLine={false} width={40} allowDecimals={false} tickFormatter={fmtCompact} />
@@ -45,13 +45,13 @@ export function RequestsChart({ series, bucketMs, className }: { series: UsagePo
           dataKey="ok"
           stackId="r"
           fill="var(--color-ok)"
-          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.failed || p.payload.turnedAway ? 0 : [3, 3, 0, 0]} />}
+          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.failed || p.payload.turnedAway ? 0 : [1.5, 1.5, 0, 0]} />}
         />
         <Bar
           dataKey="failed"
           stackId="r"
           fill="var(--color-failed)"
-          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.turnedAway ? 0 : [3, 3, 0, 0]} />}
+          shape={(p: BarShapeProps) => <Rectangle {...p} radius={p.payload.turnedAway ? 0 : [1.5, 1.5, 0, 0]} />}
         />
         {anyTurnedAway && <Bar dataKey="turnedAway" stackId="r" fill="var(--color-turnedAway)" radius={[3, 3, 0, 0]} />}
       </BarChart>
@@ -77,7 +77,7 @@ export function TokensChart({ series, bucketMs, className }: { series: UsagePoin
   }))
   return (
     <ChartContainer config={tokensConfig} className={className ?? 'aspect-auto h-64 w-full'}>
-      <BarChart data={data} barCategoryGap="15%" maxBarSize={24} margin={{ left: 0, right: 0, top: 4 }}>
+      <BarChart data={data} barCategoryGap="28%" maxBarSize={14} margin={{ left: 0, right: 0, top: 4 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="t" tickLine={false} axisLine={false} minTickGap={40} {...timeAxis(series, bucketMs)} />
         <YAxis tickLine={false} axisLine={false} width={40} tickFormatter={fmtCompact} />
@@ -108,19 +108,15 @@ export function RankedList({
   const max = Math.max(1, ...items.map((i) => i.value))
   if (!items.length) return <p className="py-6 text-center text-sm text-muted-foreground">{empty}</p>
   return (
-    <ul className="space-y-3">
+    <ul className="-my-1.5">
       {items.map((i) => (
-        <li key={i.key} className="space-y-1.5">
-          <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="min-w-0 truncate font-medium">{i.label}</span>
-            <span className="shrink-0 text-muted-foreground tabular">
-              {i.hint && <span className="mr-2 text-xs">{i.hint}</span>}
-              {valueLabel(i.value)}
-            </span>
+        <li key={i.key} className="flex items-center gap-4 py-1.5 text-[0.84rem]">
+          <span className="w-44 min-w-0 shrink-0 truncate max-sm:w-32">{i.label}</span>
+          <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-[1px] bg-foreground/8">
+            <div className="h-full bg-meter" style={{ width: `${(i.value / max) * 100}%` }} />
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-chart-1" style={{ width: `${(i.value / max) * 100}%` }} />
-          </div>
+          {i.hint && <span className="w-24 shrink-0 text-right text-xs text-muted-foreground tabular max-sm:hidden">{i.hint}</span>}
+          <span className="w-12 shrink-0 text-right font-medium tabular">{valueLabel(i.value)}</span>
         </li>
       ))}
     </ul>
@@ -128,7 +124,7 @@ export function RankedList({
 }
 
 const latencyConfig = {
-  avgLatency: { label: 'Avg latency', color: 'var(--chart-1)' },
+  avgLatency: { label: 'Avg latency', color: 'var(--meter)' },
 } satisfies ChartConfig
 
 const latencyTick = (ms: number) => (ms === 0 ? '0' : ms >= 1000 ? `${+(ms / 1000).toFixed(1)}s` : `${ms}ms`)
@@ -160,8 +156,8 @@ export function LatencyChart({ series, bucketMs, className }: { series: UsagePoi
           dataKey="avgLatency"
           type="monotone"
           stroke="var(--color-avgLatency)"
-          strokeWidth={2}
-          dot={{ r: 2.5, strokeWidth: 0, fill: 'var(--color-avgLatency)', fillOpacity: 1 }}
+          strokeWidth={1.5}
+          dot={{ r: 1.5, strokeWidth: 0, fill: 'var(--color-avgLatency)', fillOpacity: 1 }}
           activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--card)' }}
           connectNulls={false}
           isAnimationActive={false}

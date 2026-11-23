@@ -156,8 +156,8 @@ function BreakdownTable({
           const share = totalRequests ? r.requests / totalRequests : 0
           return (
             <div className="flex items-center gap-2">
-              <div className="h-1.5 w-10 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-chart-1" style={{ width: `${share * 100}%` }} />
+              <div className="h-1 w-10 overflow-hidden rounded-[1px] bg-foreground/8">
+                <div className="h-full bg-meter" style={{ width: `${share * 100}%` }} />
               </div>
               <span className="w-8 text-right text-xs text-muted-foreground tabular">{fmtPercent(share, 0)}</span>
             </div>

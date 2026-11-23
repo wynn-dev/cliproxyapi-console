@@ -1,20 +1,21 @@
-import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon } from 'lucide-react'
-import { useState } from 'react'
+import { CheckIcon, CopyIcon, EyeIcon, EyeOffIcon, InfoIcon } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { copyText } from '@/lib/clipboard'
 import { maskSecret } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+/** The page's title, with what the page is for in a hover beside it, and its actions on the right. */
 export function PageHeader({ title, description, actions }: { title: string; description?: React.ReactNode; actions?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-3">
+      <div className="flex items-center gap-2">
+        <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.02em]">{title}</h1>
+        {description && <Hint label={`About ${title}`}>{description}</Hint>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -65,30 +66,26 @@ export function SecretText({ value, className }: { value: string; className?: st
   )
 }
 
+/** A figure: a small label over a large number, with a line of context under it. No box. */
 export function StatCard({
   label,
   value,
   hint,
-  icon: Icon,
   loading,
 }: {
   label: string
   value: React.ReactNode
   hint?: React.ReactNode
+  /** Kept for callers; figures carry no icon. */
   icon?: React.ComponentType<{ className?: string }>
   loading?: boolean
 }) {
   return (
-    <Card className="gap-0 py-4">
-      <CardContent className="space-y-1.5 px-4">
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          {label}
-          {Icon && <Icon className="size-4" />}
-        </div>
-        {loading ? <Skeleton className="h-8 w-24" /> : <div className="text-2xl font-semibold tracking-tight">{value}</div>}
-        {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
-      </CardContent>
-    </Card>
+    <div className="min-w-0 space-y-1">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      {loading ? <Skeleton className="h-7 w-20" /> : <div className="text-[1.45rem] leading-tight font-semibold tracking-[-0.02em] tabular">{value}</div>}
+      {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
+    </div>
   )
 }
 
@@ -118,9 +115,9 @@ export function RequestSparkline({ buckets, className }: { buckets: { success: n
                   <div className="h-px w-full bg-border" />
                 ) : (
                   <>
-                    {b.failed > 0 && <div className="w-full rounded-t-[1px] bg-critical" style={{ height: `${(b.failed / max) * 100}%` }} />}
+                    {b.failed > 0 && <div className="w-full bg-critical" style={{ height: `${(b.failed / max) * 100}%` }} />}
                     {b.success > 0 && (
-                      <div className={cn('w-full bg-chart-1', b.failed === 0 && 'rounded-t-[1px]')} style={{ height: `${(b.success / max) * 100}%` }} />
+                      <div className="w-full bg-meter/80" style={{ height: `${(b.success / max) * 100}%` }} />
                     )}
                   </>
                 )}
@@ -136,5 +133,48 @@ export function RequestSparkline({ buckets, className }: { buckets: { success: n
         )
       })}
     </div>
+  )
+}
+
+/**
+ * An explanation kept out of the way: an info mark that shows it on hover, focus or tap, so a screen
+ * at rest is titles and controls.
+ */
+export function Hint({ children, label = 'What is this?', className }: { children: React.ReactNode; label?: string; className?: string }) {
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Moving from the mark to the text crosses a gap; wait a moment before closing.
+  const hover = (on: boolean) => {
+    clearTimeout(timer.current)
+    if (on) setOpen(true)
+    else timer.current = setTimeout(() => setOpen(false), 120)
+  }
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          className={cn(
+            'inline-flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/60 transition-colors outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:text-foreground',
+            className,
+          )}
+          onMouseEnter={() => hover(true)}
+          onMouseLeave={() => hover(false)}
+        >
+          <InfoIcon className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        className="w-80 gap-1.5 text-xs leading-relaxed text-muted-foreground [&_strong]:text-foreground"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onMouseEnter={() => hover(true)}
+        onMouseLeave={() => hover(false)}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
   )
 }

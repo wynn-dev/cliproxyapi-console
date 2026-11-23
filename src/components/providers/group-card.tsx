@@ -70,8 +70,8 @@ export function GroupCard({ meta, group, index, usage, status, onEdit, onDelete,
         <CardDescription className="truncate font-mono text-xs">
           {group['base-url'] || (meta.defaultBaseUrl ? `${meta.defaultBaseUrl} (default)` : 'Provider default endpoint')}
         </CardDescription>
-        <CardAction className="flex gap-1">
-          <Button variant="outline" size="sm" onClick={onEdit}>
+        <CardAction className="-ml-2.5 gap-1">
+          <Button variant="ghost" size="sm" onClick={onEdit}>
             <PencilIcon />
             Edit
           </Button>
@@ -87,7 +87,7 @@ export function GroupCard({ meta, group, index, usage, status, onEdit, onDelete,
       </CardHeader>
 
       <CardContent className="space-y-3">
-        <div className="flex flex-wrap gap-1.5 empty:hidden">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 empty:hidden">
           {group.prefix && (
             <Chip icon={TagIcon} tip="Models are exposed as <prefix>/<model>">
               prefix <span className="font-mono">{group.prefix}</span>
@@ -131,16 +131,16 @@ export function GroupCard({ meta, group, index, usage, status, onEdit, onDelete,
         </div>
 
         {keys.length === 0 ? (
-          <div className="rounded-lg border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+          <div className="py-3 text-sm text-muted-foreground">
             {compat ? 'No API keys — requests are sent without authentication.' : 'No API keys — this group serves no traffic.'}
           </div>
         ) : (
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y border-y">
             {keys.map((k, i) => {
               const u = findKeyUsage(usage, meta.id, group, k['api-key'])
               const info = infos[i]
               return (
-                <li key={`${i}-${k['api-key']}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5 pr-1.5 pl-3">
+                <li key={`${i}-${k['api-key']}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5">
                   <SecretText value={k['api-key']} className="min-w-0 flex-1" />
                   <div className="flex items-center gap-1.5">
                     {k.weight != null && (
@@ -180,7 +180,7 @@ export function GroupCard({ meta, group, index, usage, status, onEdit, onDelete,
           </ul>
         )}
       </CardContent>
-      <CardFooter className="justify-between py-2">
+      <CardFooter className="justify-between border-t-0 pt-1 @5xl/main:mt-0">
         <span className="text-xs text-muted-foreground">
           {keys.length} {keys.length === 1 ? 'key' : 'keys'}
           {keys.length > 0 && ' · traffic since CLIProxyAPI started'}
@@ -198,10 +198,10 @@ function Chip({ icon: Icon, tip, children }: { icon: React.ComponentType; tip: R
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant="secondary" className="cursor-default">
+        <span tabIndex={0} className="inline-flex cursor-default items-center gap-1 rounded-sm text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-3.5">
           <Icon />
           {children}
-        </Badge>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{tip}</TooltipContent>
     </Tooltip>

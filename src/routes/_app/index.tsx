@@ -14,9 +14,9 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AccountsCard } from '@/components/accounts-card'
-import { PoolAvailability } from '@/components/pool-availability'
+import { PoolAvailability, usePools } from '@/components/pool-availability'
 import { PROCESS_LABEL } from '@/components/app-sidebar'
-import { CopyButton, PageHeader, StatCard, StatusDot } from '@/components/common'
+import { CopyButton, StatCard, StatusDot } from '@/components/common'
 import { confirm } from '@/components/confirm'
 import { validateAccountSearch } from '@/components/credentials/lib'
 import { ForecastLine } from '@/components/insights/forecast'
@@ -24,7 +24,7 @@ import { RankedList, RequestsChart } from '@/components/usage-charts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle, Panels } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -32,6 +32,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { useNow } from '@/hooks/use-now'
 import { consoleApi } from '@/lib/api'
 import { fmtAgo, fmtBytes, fmtCompact, fmtDuration, fmtMs, fmtNumber, fmtPercent } from '@/lib/format'
+import { providerLabel } from '@/lib/providers'
 import { queries, usageQueries } from '@/lib/queries'
 import type { ConsoleStatus } from '@/lib/types'
 
@@ -56,71 +57,97 @@ function Overview() {
   const usage = useQuery(usageQueries.summary({ from: now - 86_400_000, to: now }))
   const t = usage.data?.totals
 
+  const pools = usePools(running)?.pools ?? []
+
   return (
     <>
-      <PageHeader
-        title="Overview"
-        actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/connect">
-              <PlugIcon />
-              Connect Claude Code
-            </Link>
-          </Button>
-        }
-      />
-      <div className="-mt-4 space-y-1.5">
-        <ProcessCard status={status} />
-        <ForecastLine />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="text-[15px] font-semibold tracking-[-0.01em] max-md:sr-only">Overview</h1>
+          <ProcessCard status={status} />
+        </div>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/connect">
+            <PlugIcon />
+            Connect Claude Code
+          </Link>
+        </Button>
       </div>
       <PoolAvailability running={running} />
-      <div>
-        <AccountsCard running={running} account={account} />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Last 24 hours</CardTitle>
-            <CardDescription>Every request through the proxy</CardDescription>
-            <CardAction>
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/usage">
-                  Usage <ArrowRightIcon />
-                </Link>
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4">
-              <StatCard label="Requests" loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
-              <StatCard label="Success rate" loading={!usage.data} value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'} hint="Across all credentials" />
-              <StatCard
-                label="Tokens"
-                loading={!usage.data}
-                value={fmtCompact(t?.total)}
-                hint={t?.total ? `${fmtCompact(t.output)} out · ${fmtCompact(t.cached)} cached` : undefined}
+      <Panels className="grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+        {pools.map((p) => (
+          <StatCard
+            key={p.provider}
+            label={`${providerLabel(p.provider)} accounts`}
+            value={
+              <span className="inline-flex items-center gap-2">
+                <StatusDot tone={p.available === 0 ? 'bad' : p.available < p.total ? 'warn' : 'good'} />
+                {p.available}
+                <span className="text-muted-foreground">/ {p.total}</span>
+              </span>
+            }
+            hint="available now"
+          />
+        ))}
+        <StatCard label="Requests · 24h" loading={!usage.data} value={fmtNumber(t?.requests)} hint={t?.failed ? `${fmtNumber(t.failed)} failed` : 'No failures'} />
+        <StatCard label="Success rate" loading={!usage.data} value={t?.requests ? fmtPercent(1 - t.failed / t.requests) : '—'} hint="across all credentials" />
+        <StatCard label="Tokens · 24h" loading={!usage.data} value={fmtCompact(t?.total)} hint={t?.total ? `${fmtCompact(t.cached)} cached` : undefined} />
+        <StatCard label="Avg latency" loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
+      </Panels>
+
+      <Panels className="xl:grid-cols-[minmax(0,1fr)_21rem]">
+        <AccountsCard running={running} account={account} />
+        <div className="grid auto-rows-min gap-px bg-border xl:auto-rows-auto xl:grid-rows-[auto_1fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Run-out forecast</CardTitle>
+              <CardAction>
+                <Button variant="ghost" size="xs" asChild>
+                  <Link to="/insights">
+                    Insights <ArrowRightIcon />
+                  </Link>
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <ForecastLine />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Top models</CardTitle>
+              <CardDescription>24h, by requests</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RankedList
+                items={(usage.data?.byModel ?? []).slice(0, 6).map((m) => ({
+                  key: m.key,
+                  label: m.key || 'unknown',
+                  value: m.requests,
+                }))}
               />
-              <StatCard label="Avg latency" loading={!usage.data} value={fmtMs(t?.avgLatency)} hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined} />
-            </div>
-            {usage.data ? <RequestsChart series={usage.data.series} bucketMs={usage.data.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Top models</CardTitle>
-            <CardDescription>By requests, last 24 hours</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <RankedList
-              items={(usage.data?.byModel ?? []).slice(0, 6).map((m) => ({
-                key: m.key,
-                label: m.key || 'unknown',
-                value: m.requests,
-                hint: `${fmtCompact(m.total)} tokens`,
-              }))}
-            />
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      </Panels>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Requests</CardTitle>
+          <CardDescription>Last 24 hours</CardDescription>
+          <CardAction>
+            <Button variant="ghost" size="xs" asChild>
+              <Link to="/usage">
+                Usage <ArrowRightIcon />
+              </Link>
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {usage.data ? <RequestsChart series={usage.data.series} bucketMs={usage.data.bucketMs} className="aspect-auto h-48 w-full" /> : <Skeleton className="h-48 w-full" />}
+        </CardContent>
+      </Card>
     </>
   )
 }
@@ -209,13 +236,13 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
             ref={toggle}
             type="button"
             aria-expanded={false}
-            className="-mx-1.5 flex min-w-0 items-center gap-x-2 rounded-md px-1.5 py-1 text-left text-[0.84rem] outline-none hover:bg-foreground/[0.035] focus-visible:ring-2 focus-visible:ring-ring/50 max-sm:basis-full"
+            className="flex min-w-0 items-center gap-x-2 rounded-[5px] px-1.5 py-0.5 text-left text-xs outline-none hover:bg-foreground/[0.05] focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={() => setOpen(true)}
           >
             <StatusDot tone={meta.tone} pulse={p.state === 'starting'} />
             <span className="min-w-0 flex-1">
               <span>CLIProxyAPI</span>
-              <span className="text-muted-foreground tabular">
+              <span className="text-muted-foreground">
                 {' · '}
                 {[meta.label.toLowerCase(), cpa.version, uptime && `up ${uptime}`].filter(Boolean).join(' · ')}
                 {p.startedAfterHang && p.lastHangAt
@@ -236,7 +263,7 @@ function ProcessCard({ status }: { status?: ConsoleStatus }) {
             <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Details" />
           </button>
           {!status.service && (
-            <span className="text-[0.84rem] text-muted-foreground">
+            <span className="text-xs text-muted-foreground max-sm:hidden">
               <KeepRunning command={status.serviceCommand} />
             </span>
           )}

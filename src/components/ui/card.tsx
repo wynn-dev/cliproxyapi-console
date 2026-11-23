@@ -1,10 +1,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-/**
- * A section of a page, not a box: a hairline above it, its title in a gutter on the left on wide
- * screens, its content beside it.
- */
+/** A panel: a titled strip over its content, framed by hairlines. Inside `Panels` it shares its frame. */
 function Card({
   className,
   size = "default",
@@ -15,9 +12,20 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "group/card grid gap-x-10 gap-y-4 border-t py-7 text-sm text-card-foreground @5xl/main:grid-cols-[10.5rem_minmax(0,1fr)] data-[size=sm]:py-4",
+        "group/card flex min-w-0 flex-col rounded-md border bg-card text-sm text-card-foreground in-data-[slot=panels]:rounded-none in-data-[slot=panels]:border-0",
         className
       )}
+      {...props}
+    />
+  )
+}
+
+/** Panels laid out in one frame: the gaps between them are the hairlines. */
+function Panels({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="panels"
+      className={cn("grid gap-px overflow-hidden rounded-md border bg-border", className)}
       {...props}
     />
   )
@@ -28,7 +36,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "group/card-header flex min-w-0 flex-col items-start gap-1 @5xl/main:row-span-3",
+        "group/card-header flex min-h-10 min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 border-b px-3 py-2",
         className
       )}
       {...props}
@@ -40,10 +48,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-title"
-      className={cn(
-        "font-heading text-[0.9rem] leading-snug font-semibold tracking-[-0.005em]",
-        className
-      )}
+      className={cn("font-heading text-[13px] leading-snug font-medium", className)}
       {...props}
     />
   )
@@ -53,7 +58,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-description"
-      className={cn("text-[0.8rem] leading-relaxed text-muted-foreground", className)}
+      className={cn("min-w-0 truncate text-xs text-muted-foreground", className)}
       {...props}
     />
   )
@@ -63,7 +68,7 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-action"
-      className={cn("mt-1.5 -ml-2.5", className)}
+      className={cn("-my-1 -mr-1.5 ml-auto flex items-center gap-1", className)}
       {...props}
     />
   )
@@ -73,7 +78,7 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-content"
-      className={cn("min-w-0", className)}
+      className={cn("min-w-0 flex-1 p-3", className)}
       {...props}
     />
   )
@@ -83,10 +88,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-footer"
-      className={cn(
-        "flex min-w-0 items-center border-t pt-4 @5xl/main:col-start-2",
-        className
-      )}
+      className={cn("flex min-w-0 items-center border-t px-3 py-2", className)}
       {...props}
     />
   )
@@ -100,4 +102,5 @@ export {
   CardAction,
   CardDescription,
   CardContent,
+  Panels,
 }

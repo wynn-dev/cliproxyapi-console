@@ -110,8 +110,8 @@ export function RankedList({
   return (
     <ul className="-my-1.5">
       {items.map((i) => (
-        <li key={i.key} className="flex items-center gap-4 py-1.5 text-[0.84rem]">
-          <span className="w-44 min-w-0 shrink-0 truncate max-sm:w-32">{i.label}</span>
+        <li key={i.key} className="flex items-center gap-3 py-1.5 text-[13px]">
+          <span className="w-36 min-w-0 shrink-0 truncate font-mono text-xs max-sm:w-32">{i.label}</span>
           <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-[1px] bg-foreground/8">
             <div className="h-full bg-meter" style={{ width: `${(i.value / max) * 100}%` }} />
           </div>

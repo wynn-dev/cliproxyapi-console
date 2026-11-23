@@ -188,7 +188,7 @@ function LimitMeter({
         </div>
         {!!reserve && <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />}
       </div>
-      <span className={cn('w-[4.5rem] shrink-0 truncate text-xs tabular', held ? 'font-medium text-foreground' : 'text-muted-foreground')}>{short}</span>
+      <span className={cn('w-[5rem] shrink-0 truncate text-xs tabular', held ? 'font-medium text-foreground' : 'text-muted-foreground')}>{short}</span>
     </div>
   ) : undefined
   return (
@@ -259,7 +259,7 @@ export function PoolMeter({ pool: p, reserve, now, inline }: { pool: PoolLimit; 
         </div>
         {!!reserve && <div aria-hidden className="absolute -inset-y-[3px] w-px bg-foreground/60" style={{ left: `${reserve}%` }} />}
       </div>
-      <span className="w-[4.5rem] shrink-0 truncate text-xs text-muted-foreground tabular">
+      <span className="w-[5rem] shrink-0 truncate text-xs text-muted-foreground tabular">
         {p.nextReset ? fmtUntil(p.nextReset.at - now) : ''}
       </span>
     </div>

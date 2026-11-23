@@ -8,9 +8,8 @@ import { accountName, credState, reserveHold, reserveNote, useAccountParam } fro
 import { ModelsDialog } from '@/components/credentials/models-dialog'
 import { CredentialStatus, SignInHint } from '@/components/credentials/status'
 import { AccountMeters, PoolMeter } from '@/components/limit-meter'
-import { PoolSummary } from '@/components/pool-availability'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNow } from '@/hooks/use-now'
@@ -67,30 +66,25 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
     <Card>
       <CardHeader>
         <CardTitle>Accounts</CardTitle>
-        <PoolSummary running={running} />
+        {config.data && accounts.length > 0 && (
+          <CardDescription className="inline-flex items-center gap-1.5">
+            {scattered && <StatusDot tone="warn" />}
+            <Link to="/settings" search={{ section: 'routing' }} className="hover:text-foreground hover:underline">
+              {strategyLabel(routing.strategy)}
+              {routing.affinity && ', sticky sessions'}
+              {scattered && ': conversations can lose their prompt cache'}
+            </Link>
+          </CardDescription>
+        )}
         <CardAction>
-          <Button variant="ghost" size="sm" asChild>
+          <Button variant="ghost" size="xs" asChild>
             <Link to="/credentials">
               Manage <ArrowRightIcon />
             </Link>
           </Button>
         </CardAction>
-        {config.data && accounts.length > 0 && (
-          <p className="mt-auto hidden pt-4 text-xs leading-relaxed text-muted-foreground @5xl/main:block">
-            <span className="inline-flex items-center gap-1.5 text-foreground">
-              {scattered && <StatusDot tone="warn" />}
-              {strategyLabel(routing.strategy)}
-              {routing.affinity && ', sticky'}
-            </span>
-            <br />
-            {scattered ? 'Conversations can move between accounts and lose their prompt cache. ' : ''}
-            <Link to="/settings" search={{ section: 'routing' }} className="text-link hover:underline">
-              {scattered ? 'Fix in Settings' : 'Routing settings'}
-            </Link>
-          </p>
-        )}
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-1.5 pt-0 pb-1.5">
         {!running ? (
           <Empty>Start CLIProxyAPI to see your accounts.</Empty>
         ) : credentials.isPending ? (
@@ -107,19 +101,19 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
           </Empty>
         ) : (
           <div style={grid}>
-            <div className={cn(ROW_GRID, 'border-b pb-2 text-xs text-muted-foreground max-md:hidden')}>
+            <div className={cn(ROW_GRID, 'h-8 border-b px-1.5 text-xs text-muted-foreground max-md:hidden')}>
               <span>Account</span>
               {columns.map((l) => (
                 <span key={l}>{COLUMN_LABEL[l] ?? l}</span>
               ))}
             </div>
             {pools.length > 0 && (
-              <ul className="border-b py-1.5">
+              <ul className="border-b py-1">
                 {[...new Set(pools.map((p) => p.provider))].map((provider) => {
                   const own = pools.filter((p) => p.provider === provider)
                   return (
-                    <li key={provider} className={cn(ROW_GRID, 'py-2')}>
-                      <div className="min-w-0 text-[0.84rem]">
+                    <li key={provider} className={cn(ROW_GRID, 'px-1.5 py-1.5')}>
+                      <div className="min-w-0 text-[13px]">
                         <span className="font-medium">All {providerLabel(provider)}</span>
                         <span className="text-muted-foreground"> · {own[0]!.accounts} accounts</span>
                       </div>
@@ -136,7 +130,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
                 })}
               </ul>
             )}
-            <ul className="pt-1.5">
+            <ul className="pt-1">
               {accounts.map((c) => (
                 <AccountRow
                   key={c.id}
@@ -167,7 +161,7 @@ export function AccountsCard({ running, account }: { running: boolean; account?:
 const COLUMN_ORDER = ['5h', 'Weekly', 'Fable']
 const COLUMN_LABEL: Record<string, string> = { '5h': '5-hour' }
 /** Account, then one cell per limit column; on phones each meter gets its own line. */
-const ROW_GRID = 'grid items-center gap-x-6 gap-y-1.5 md:grid-cols-[minmax(0,13rem)_repeat(var(--cols),minmax(0,1fr))]'
+const ROW_GRID = 'grid items-center gap-x-6 gap-y-1.5 md:grid-cols-[minmax(0,15rem)_repeat(var(--cols),minmax(0,1fr))]'
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="py-6 text-sm text-muted-foreground">{children}</div>
@@ -202,15 +196,15 @@ function AccountRow({
   return (
     // The whole row opens the account panel, where everything the tooltips say is also spelled out for touch screens.
     <li
-      className={cn(ROW_GRID, 'group -mx-2.5 cursor-pointer rounded-md px-2.5 py-2.5 transition-colors hover:bg-foreground/[0.035] dark:hover:bg-foreground/[0.05]')}
+      className={cn(ROW_GRID, 'group cursor-pointer rounded-[5px] px-1.5 py-1.5 transition-colors hover:bg-foreground/[0.04] dark:hover:bg-foreground/[0.05]')}
       onClick={onOpen}
     >
-      <div className="min-w-0 space-y-0.5">
+      <div className="min-w-0">
         <div className="flex min-w-0 items-baseline gap-2">
           <button
             type="button"
             aria-haspopup="dialog"
-            className="truncate rounded-sm text-left text-[0.84rem] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="truncate rounded-sm text-left text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={(e) => {
               e.stopPropagation()
               onOpen()

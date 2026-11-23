@@ -22,7 +22,7 @@ const REASONS: { state: Exclude<Availability, 'available'>; label: (n: number) =
   { state: 'disabled', label: (n) => `${n} turned off` },
 ]
 
-function usePools(running: boolean) {
+export function usePools(running: boolean) {
   const credentials = useQuery({ ...queries.credentials(), enabled: running })
   const reserve = useQuery({ ...queries.reserve(), enabled: running })
   const now = useTicker(running, 5_000)

@@ -14,7 +14,7 @@ import { RecentRequests } from '@/components/usage/recent-requests'
 import { DEFAULT_RANGE, RANGES, bucketName, filterParams, hasFilters, rangeStart, validateUsageSearch } from '@/components/usage/search'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, Panels } from '@/components/ui/card'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -113,13 +113,8 @@ function UsagePage() {
           </EmptyContent>
         </Empty>
       ) : (
-        <div className={cn('transition-opacity', refreshing && 'opacity-60')}>
-          <Card>
-            <CardHeader>
-              <CardTitle>Totals</CardTitle>
-              <CardDescription>{RANGES[range].label}</CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-3">
+        <div className={cn('space-y-4 transition-opacity', refreshing && 'opacity-60')}>
+          <Panels className="grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
             <StatCard
               label="Requests"
               loading={!s}
@@ -156,18 +151,19 @@ function UsagePage() {
               value={fmtMs(t?.avgLatency)}
               hint={t?.avgTtft ? `${fmtMs(t.avgTtft)} to first token` : undefined}
             />
-            </CardContent>
-          </Card>
+          </Panels>
 
-          <ChartCard title="Requests" description={subtitle}>
-            {s ? <RequestsChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
-          </ChartCard>
-          <ChartCard title="Tokens" description={subtitle}>
-            {s ? <TokensChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
-          </ChartCard>
-          <ChartCard title="Average latency" description={`${subtitle} · full request duration`}>
-            {s ? <LatencyChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-40 w-full" /> : <Skeleton className="h-40 w-full" />}
-          </ChartCard>
+          <Panels className="lg:grid-cols-2">
+            <ChartCard title="Requests" description={subtitle}>
+              {s ? <RequestsChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
+            </ChartCard>
+            <ChartCard title="Tokens" description={subtitle}>
+              {s ? <TokensChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-52 w-full" /> : <Skeleton className="h-52 w-full" />}
+            </ChartCard>
+            <ChartCard title="Average latency" description={`${subtitle} · full request duration`} className="lg:col-span-2">
+              {s ? <LatencyChart series={s.series} bucketMs={s.bucketMs} className="aspect-auto h-36 w-full" /> : <Skeleton className="h-36 w-full" />}
+            </ChartCard>
+          </Panels>
 
           {s ? <Breakdown summary={s} labels={labels} /> : <Skeleton className="h-72 w-full rounded-xl" />}
         </div>
@@ -222,9 +218,9 @@ function ValueHint({ summary, labels }: { summary: UsageSummary; labels: Credent
   )
 }
 
-function ChartCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function ChartCard({ title, description, children, className }: { title: string; description: string; children: React.ReactNode; className?: string }) {
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

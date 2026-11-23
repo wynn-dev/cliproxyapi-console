@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
-import { ArrowRightIcon, InfoIcon } from 'lucide-react'
+import { InfoIcon } from 'lucide-react'
 import { StatusDot } from '@/components/common'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -113,21 +112,18 @@ export function ForecastLine() {
     .filter((l) => l.weekly || l.fiveHour)
   if (!lines.length) return null
   return (
-    <div className="flex flex-wrap items-start gap-x-4 gap-y-1 text-[0.84rem]">
-      <ul className="min-w-0 flex-1 basis-full space-y-1 sm:basis-0">
+    <div className="text-[13px]">
+      <ul className="space-y-2">
         {lines.map((l) => (
           <li key={l.provider} className="flex items-baseline gap-2">
             <StatusDot tone={l.weekly?.tone ?? 'warn'} className="translate-y-[-1px]" />
             <span>
-              <span>{providerLabel(l.provider)}:</span> <span className="text-muted-foreground">{l.weekly?.text}</span>
+              <span className="font-medium">{providerLabel(l.provider)}</span> <span className="text-muted-foreground">{l.weekly?.text}</span>
               {l.fiveHour && <span className={l.weekly ? 'text-muted-foreground' : undefined}> {l.fiveHour}</span>}
             </span>
           </li>
         ))}
       </ul>
-      <Link to="/insights" className="inline-flex items-center gap-1 text-link hover:underline max-sm:pl-4">
-        Insights <ArrowRightIcon className="size-3.5" />
-      </Link>
     </div>
   )
 }

@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { buttonVariants } from '@/components/ui/button'
+import { Panels } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 const SECTIONS = [
@@ -55,7 +56,7 @@ function SettingsPage() {
 
   // Sections stay mounted while hidden so switching keeps unsaved edits.
   const panel = (id: SectionId, children: React.ReactNode) => (
-    <div role="tabpanel" id={`settings-${id}`} aria-labelledby={`settings-tab-${id}`} hidden={section !== id}>
+    <div role="tabpanel" id={`settings-${id}`} aria-labelledby={`settings-tab-${id}`} hidden={section !== id} className="grid gap-px bg-border">
       {children}
     </div>
   )
@@ -64,10 +65,10 @@ function SettingsPage() {
     <>
       <PageHeader title="Settings" />
 
-      <div className="flex flex-col gap-2">
-        <nav aria-label="Settings sections" className="-mx-4 overflow-x-auto border-b px-4 md:mx-0 md:px-0">
-          <div role="tablist" aria-orientation="horizontal" className="flex gap-5">
-            {SECTIONS.map(({ id, label }) => (
+      <Panels className="max-w-5xl md:grid-cols-[12rem_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="overflow-x-auto bg-background p-1.5 max-md:border-b-0">
+          <div role="tablist" aria-orientation="vertical" className="flex gap-0.5 md:flex-col">
+            {SECTIONS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 id={`settings-tab-${id}`}
@@ -76,9 +77,10 @@ function SettingsPage() {
                 aria-controls={`settings-${id}`}
                 data-active={section === id}
                 onClick={() => navigate({ search: { section: id }, replace: true })}
-                className="flex shrink-0 items-center gap-1.5 pt-1 pb-2.5 text-left text-[0.84rem] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground data-[active=true]:text-foreground data-[active=true]:shadow-[inset_0_-1.5px_0_var(--foreground)]"
+                className="flex h-8 shrink-0 items-center gap-2 rounded-[5px] px-2 text-left text-[13px] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[active=true]:bg-foreground/[0.06] data-[active=true]:text-foreground [&_svg]:size-4"
               >
-                <span>{label}</span>
+                <Icon />
+                <span className="flex-1">{label}</span>
                 {tabDirty(id) && (
                   <span className="size-1.5 rounded-full bg-warning" title="Unsaved changes">
                     <span className="sr-only">(unsaved changes)</span>
@@ -89,7 +91,7 @@ function SettingsPage() {
           </div>
         </nav>
 
-        <div className="min-w-0 flex-1">
+        <div className="grid min-w-0 auto-rows-min gap-px bg-border">
           {panel(
             'routing',
             <>
@@ -111,7 +113,7 @@ function SettingsPage() {
           )}
           {panel('yaml', <YamlSection onDirty={onDirty} />)}
         </div>
-      </div>
+      </Panels>
 
       <AlertDialog open={blocker.status === 'blocked'} onOpenChange={(open) => !open && blocker.reset?.()}>
         <AlertDialogContent>

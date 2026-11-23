@@ -11,10 +11,10 @@ import { cn } from '@/lib/utils'
 
 export function PageHeader({ title, description, actions }: { title: string; description?: React.ReactNode; actions?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div className="space-y-1">
-        <h1 className="text-[1.6rem] leading-tight font-semibold tracking-[-0.02em]">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+    <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h1 className="text-[15px] font-semibold tracking-[-0.01em] max-md:sr-only">{title}</h1>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -80,9 +80,9 @@ export function StatCard({
   loading?: boolean
 }) {
   return (
-    <div className="min-w-0 space-y-1">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      {loading ? <Skeleton className="h-7 w-20" /> : <div className="text-[1.45rem] leading-tight font-semibold tracking-[-0.02em] tabular">{value}</div>}
+    <div className="min-w-0 space-y-1 bg-background px-3 py-2.5">
+      <div className="truncate text-xs text-muted-foreground">{label}</div>
+      {loading ? <Skeleton className="h-6 w-20" /> : <div className="truncate text-[19px] leading-snug font-medium tabular">{value}</div>}
       {hint && <div className="truncate text-xs text-muted-foreground">{hint}</div>}
     </div>
   )

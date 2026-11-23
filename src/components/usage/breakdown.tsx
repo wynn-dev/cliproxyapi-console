@@ -8,7 +8,7 @@ import {
 } from '@tanstack/react-table'
 import { ArrowDownIcon, ArrowUpIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { fmtCompact, fmtMs, fmtNumber, fmtPercent, fmtUsd } from '@/lib/format'
@@ -59,17 +59,19 @@ export function Breakdown({ summary, labels }: { summary: UsageSummary; labels: 
           {dim === 'credential' && 'Accounts count every attempt, so a request that failed over shows on each account it tried. '}
           Select a row to filter the whole page by it.
         </CardDescription>
+        <CardAction>
+          <Tabs value={dim} onValueChange={(v) => setDim(v as Dimension)}>
+            <TabsList className="max-w-full overflow-x-auto">
+              {DIMENSIONS.map((x) => (
+                <TabsTrigger key={x.id} value={x.id} className="px-2">
+                  {x.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </CardAction>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <Tabs value={dim} onValueChange={(v) => setDim(v as Dimension)}>
-          <TabsList className="max-w-full overflow-x-auto">
-            {DIMENSIONS.map((x) => (
-              <TabsTrigger key={x.id} value={x.id} className="px-2.5">
-                {x.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+      <CardContent className="py-1">
         <BreakdownTable key={dim} dim={dim} rows={rows} totalRequests={totalRequests} labels={labels} onSelect={apply} />
       </CardContent>
     </Card>

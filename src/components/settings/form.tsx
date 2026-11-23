@@ -31,30 +31,24 @@ export function SectionCard({
   footerNote?: React.ReactNode
 }) {
   return (
-    <section
-      data-slot="settings-section"
-      aria-label={title}
-      className="grid gap-x-10 gap-y-3 border-t py-6 first:border-t-0 first:pt-2 @5xl/main:grid-cols-[10.5rem_minmax(0,1fr)]"
-    >
-      <header className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <h2 className="text-[0.9rem] font-semibold">{title}</h2>
-          <Hint label={`About ${title}`}>{description}</Hint>
-        </div>
+    <section data-slot="settings-section" aria-label={title} className="bg-background">
+      <header className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 border-b bg-foreground/[0.025] px-3 py-1.5">
+        <h2 className="text-[13px] font-medium">{title}</h2>
+        <Hint label={`About ${title}`}>{description}</Hint>
         {footerNote && <p className="text-xs text-muted-foreground">{footerNote}</p>}
         {form.dirty && (
-          <div className="flex items-center gap-1.5 pt-1">
-            <Button size="sm" disabled={!form.valid || form.saving} onClick={onSave ?? (() => void form.save())}>
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="ghost" size="xs" disabled={form.saving} onClick={form.reset}>
+              Reset
+            </Button>
+            <Button size="xs" disabled={!form.valid || form.saving} onClick={onSave ?? (() => void form.save())}>
               {form.saving && <Spinner />}
               Save
-            </Button>
-            <Button variant="ghost" size="sm" disabled={form.saving} onClick={form.reset}>
-              Reset
             </Button>
           </div>
         )}
       </header>
-      {form.loaded ? <FieldGroup className="gap-0 divide-y">{children}</FieldGroup> : <FormSkeleton />}
+      {form.loaded ? <FieldGroup className="gap-0 divide-y px-3">{children}</FieldGroup> : <div className="p-3"><FormSkeleton /></div>}
     </section>
   )
 }
